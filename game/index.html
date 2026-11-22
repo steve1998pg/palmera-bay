@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PALMERA BAY — Open-World Crime</title>
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game" aria-label="Palmera Bay: an open-world crime game. Drive, steal cars, outrun the police and run jobs for La Jefa."></canvas>
+
+<!-- ============ HUD ============ -->
+<div id="hud" class="hidden">
+  <!-- top left: mission + dispatch -->
+  <div id="mission-card" class="panel">
+    <div id="mission-head"><span id="mission-job">JOB 1/8</span><span id="mission-name">FIRST WHEELS</span><span id="mission-timer"></span></div>
+    <div id="mission-objective">Go to Ibarra Customs in Marina Row</div>
+    <div id="mission-stage"><div id="mission-stage-fill"></div></div>
+    <div id="mission-next">NEXT&nbsp; <span id="mission-next-text">Meet Tomas</span></div>
+  </div>
+  <div id="dispatch" class="panel hidden">
+    <div id="dispatch-head"><span>PBPD DISPATCH</span><span id="dispatch-units">0 UNITS</span></div>
+    <div id="dispatch-list"></div>
+    <div id="dispatch-foot">PBPD · Palmera Bay Police Department</div>
+  </div>
+
+  <!-- top center: clock + radio -->
+  <div id="clock-radio" class="panel"><span id="clock">17:41</span><span id="radio-now">♪ PALMERA FM 98.6 — “Golden Static”</span></div>
+
+  <!-- top right: cash, stars, rank -->
+  <div id="top-right">
+    <div id="cash">$250</div>
+    <div id="stars"></div>
+    <div id="wanted-state"></div>
+    <div id="rank-line"><span id="rank-badge">RANK 1</span><span id="rank-name">NOBODY</span></div>
+    <div id="respect-bar"><div id="respect-fill"></div></div>
+    <div id="respect-text">0 / 250 RESPECT</div>
+  </div>
+
+  <!-- right: weapon slots -->
+  <div id="weapons"></div>
+
+  <!-- crew abilities -->
+  <div id="crew"></div>
+
+  <!-- bottom left: minimap + district + vitals -->
+  <div id="bottom-left">
+    <div id="district"><span id="district-name">Marina Row</span><span id="district-sub">Palmera Bay</span></div>
+    <canvas id="minimap" width="220" height="220"></canvas>
+    <div id="vitals">
+      <div class="vital"><span>HEALTH</span><div class="bar"><div id="health-fill"></div></div><b id="health-num">100</b></div>
+      <div class="vital"><span>ARMOUR</span><div class="bar"><div id="armour-fill"></div></div><b id="armour-num">0</b></div>
+    </div>
+  </div>
+
+  <!-- bottom right: speedo + vehicle -->
+  <div id="bottom-right">
+    <div id="radio-line">♪ <span id="radio-station">PALMERA FM 98.6</span> — <span id="radio-song">“Golden Static”</span></div>
+    <div id="vehicle-card">
+      <div id="vehicle-name">ON FOOT</div>
+      <div id="vehicle-cond"><span>CONDITION</span><div class="bar"><div id="cond-fill"></div></div><b id="cond-num">100%</b></div>
+      <div id="speed"><span id="speed-num">0</span><span id="speed-unit">KM/H</span></div>
+    </div>
+  </div>
+
+  <!-- bottom center: dialogue -->
+  <div id="dialogue" class="panel hidden">
+    <div id="dialogue-portrait">CJ</div>
+    <div id="dialogue-body"><div id="dialogue-who">CELIA “LA JEFA” DUARTE <span>FIXER · MARINA ROW</span></div><div id="dialogue-text"></div></div>
+    <div id="dialogue-hint">CLICK / E ▸ NEXT</div>
+  </div>
+
+  <!-- center: crosshair + prompt + wanted flash -->
+  <div id="crosshair" class="hidden"><div></div></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="wanted-flash" class="hidden">WANTED</div>
+  <div id="notify"></div>
+  <div id="objective-toast" class="hidden"></div>
+  <div id="damage-vignette"></div>
+</div>
+
+<!-- ============ TITLE ============ -->
+<div id="title-screen">
+  <div id="title-inner">
+    <div id="title-kicker">MAKE.FUN PRESENTS · AN ORIGINAL OPEN WORLD</div>
+    <h1 id="title-logo">PALMERA<br>BAY</h1>
+    <div id="title-tag">Steal it. Drive it. Outrun them all.</div>
+    <div id="title-story">Dante Cruz is back in Palmera Bay with $250, a borrowed pistol and a debt to La Jefa.
+      Eight jobs stand between him and the whole city — if the PBPD doesn’t get him first.</div>
+    <div id="title-buttons">
+      <button id="btn-continue" class="title-btn hidden">CONTINUE — <span id="continue-label"></span></button>
+      <button id="btn-new" class="title-btn primary">▶ NEW GAME</button>
+      <button id="btn-how" class="title-btn">HOW TO PLAY</button>
+    </div>
+    <div id="title-foot">WASD move · Mouse look · E enter / steal car · F punch · Click shoot · 1–5 weapons · R reload · M map · P pause · C radio · Z/X/C crew</div>
+    <div id="title-save-note">Progress saves automatically to this browser.</div>
+  </div>
+</div>
+
+<!-- ============ HOW TO PLAY ============ -->
+<div id="howto" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>HOW TO PLAY</h2>
+    <div class="howto-grid">
+      <div><b>W A S D</b><span>Move / drive</span></div>
+      <div><b>MOUSE</b><span>Look &amp; aim (click canvas to lock)</span></div>
+      <div><b>E</b><span>Enter / steal the nearest car · exit car</span></div>
+      <div><b>SPACE</b><span>Jump · handbrake in a car</span></div>
+      <div><b>SHIFT</b><span>Sprint · nitro (if fitted)</span></div>
+      <div><b>CLICK / F</b><span>Shoot / punch</span></div>
+      <div><b>1 – 5</b><span>Weapons · R reload · Q cycle</span></div>
+      <div><b>Z X C</b><span>Crew: getaway · repair · decoy</span></div>
+      <div><b>M</b><span>City map &amp; stats</span></div>
+      <div><b>P / ESC</b><span>Pause</span></div>
+      <div><b>C</b><span>Change radio station</span></div>
+      <div><b>G</b><span>Garage, at Ibarra Customs (G marker)</span></div>
+    </div>
+    <p>Raise your wanted level by stealing cars, shooting and ramming police. Lose the heat by breaking
+    line of sight — the search zone shrinks until the stars clear. Finish all 8 jobs to own Palmera Bay.
+    Cash buys cars, guns and upgrades at Ibarra Customs. Respect unlocks crew abilities and better jobs.</p>
+    <button id="btn-how-close" class="title-btn primary">GOT IT</button>
+  </div>
+</div>
+
+<!-- ============ PAUSE / MAP ============ -->
+<div id="pause-menu" class="overlay hidden">
+  <div class="overlay-card wide">
+    <div id="map-wrap">
+      <canvas id="bigmap" width="640" height="640"></canvas>
+      <div id="map-side">
+        <h2>PALMERA BAY</h2>
+        <div class="stat-row"><span>RESPECT</span><b id="stat-respect">LV 1 · NOBODY</b></div>
+        <div class="stat-row"><span>CASH</span><b id="stat-cash">$250</b></div>
+        <div class="stat-row"><span>JOBS DONE</span><b id="stat-jobs">0 / 8</b></div>
+        <div class="stat-row"><span>COMPLETE</span><b id="stat-complete">3%</b></div>
+        <div id="complete-bar"><div id="complete-fill"></div></div>
+        <h3>THE CREW</h3>
+        <div class="crew-row"><span class="crew-key">Z</span><b>NICO VEGA</b><i>GETAWAY · DRIVER</i></div>
+        <div class="crew-row"><span class="crew-key">X</span><b>TOMAS “WRENCH” IBARRA</b><i>QUICK FIX · MECHANIC</i></div>
+        <div class="crew-row"><span class="crew-key">C</span><b>SOFIA “EYES” RIVAS</b><i>DECOY · LOOKOUT</i></div>
+        <h3>MAP KEY</h3>
+        <div id="map-key">
+          <span><i class="mk h">H</i> SAFEHOUSE</span><span><i class="mk g">G</i> GARAGE</span>
+          <span><i class="mk r">R</i> STREET RACE</span><span><i class="mk j">4</i> NEXT JOB</span>
+          <span><i class="mk p">P</i> PRECINCT</span><span><i class="mk s">$</i> STASH</span>
+        </div>
+        <div id="map-stats">CARS STOLEN 0 · STARS LOST 0 · KNOCKOUTS 0 · RACE WINS 0 · DRIVEN 0.0 KM</div>
+        <div id="pause-buttons">
+          <button id="btn-resume" class="title-btn primary">RESUME</button>
+          <button id="btn-save" class="title-btn">SAVE</button>
+          <button id="btn-quit" class="title-btn">QUIT TO TITLE</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GARAGE / SHOP ============ -->
+<div id="shop" class="overlay hidden">
+  <div class="overlay-card wide shop-card">
+    <div id="shop-left">
+      <h2>IBARRA CUSTOMS</h2>
+      <div id="shop-sub">Tomas Ibarra · mechanic · “You break it, I bill it.”</div>
+      <div id="shop-car-view"><canvas id="shop-car-canvas" width="420" height="300"></canvas></div>
+      <div id="shop-car-name">VELOZ COMET RS</div>
+      <div id="shop-car-cond"><span>CONDITION</span><div class="bar"><div id="shop-cond-fill"></div></div><b id="shop-cond-num">100%</b></div>
+      <div id="shop-mods"><span id="mod-tune">TUNE</span><span id="mod-plating">PLATING</span><span id="mod-nitro">NITRO</span></div>
+    </div>
+    <div id="shop-right">
+      <div id="shop-cash">CASH <b id="shop-cash-num">$250</b></div>
+      <div class="shop-tabs"><span class="active">WORKSHOP</span><span>SHOWROOM</span></div>
+      <h3>CAR UPGRADES</h3>
+      <div id="shop-list"></div>
+      <h3>WEAPONS &amp; GEAR</h3>
+      <div id="shop-list2"></div>
+      <div id="shop-desc"></div>
+      <button id="btn-shop-close" class="title-btn primary">BACK TO THE STREET</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GAME OVER / JOB DONE ============ -->
+<div id="gameover" class="overlay hidden">
+  <div class="overlay-card">
+    <h2 id="gameover-title">BUSTED</h2>
+    <p id="gameover-text">The PBPD hauled you in. La Jefa posted bail — it cost you.</p>
+    <button id="btn-respawn" class="title-btn primary">BACK ON THE STREET</button>
+  </div>
+</div>
+<div id="job-done" class="overlay hidden">
+  <div class="overlay-card">
+    <h2 id="job-done-title">JOB COMPLETE</h2>
+    <p id="job-done-text"></p>
+    <div id="job-done-reward"></div>
+    <button id="btn-job-next" class="title-btn primary">KEEP GOING</button>
+  </div>
+</div>
+
+<p id="status" role="status" aria-live="polite"></p>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
