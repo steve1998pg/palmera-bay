@@ -1,69 +1,78 @@
-// Seeded RNG (mulberry32) + small math helpers used across Palmera Bay.
-// One RNG stream per purpose is created by the caller so the build order
-// stays fixed and a given seed always produces the same city.
+// Seeded randomness and the small math/format helpers every Palmera Bay
+// module leans on. One mulberry32 stream per purpose keeps the city,
+// stashes and spawns identical for a given seed.
+const TAU = Math.PI * 2;
+
 export function mulberry32(seed) {
-  let a = seed | 0;
-  return function next() {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  let state = seed | 0;
+  return function nextRandom() {
+    state = (state + 0x6d2b79f5) | 0;
+    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-export function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
+export function pick(rng, list) {
+  return list[Math.floor(rng() * list.length)];
 }
 
-export function range(rng, min, max) {
-  return min + rng() * (max - min);
+export function range(rng, lo, hi) {
+  return lo + rng() * (hi - lo);
 }
 
-export function intRange(rng, min, max) {
-  return min + Math.floor(rng() * (max - min + 1));
+export function intRange(rng, lo, hi) {
+  return lo + Math.floor(rng() * (hi - lo + 1));
 }
 
-export function clamp(v, lo, hi) {
-  return v < lo ? lo : v > hi ? hi : v;
+export function clamp(value, lo, hi) {
+  if (value < lo) return lo;
+  if (value > hi) return hi;
+  return value;
 }
 
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-// Shortest signed difference between two headings, in (-PI, PI].
-export function angleDiff(a, b) {
-  let d = a - b;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d <= -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
-export function wrapAngle(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a <= -Math.PI) a += Math.PI * 2;
-  return a;
+export function lerp(from, to, t) {
+  return from + (to - from) * t;
 }
 
 export function dist2(ax, az, bx, bz) {
-  const dx = ax - bx, dz = az - bz;
+  const dx = ax - bx;
+  const dz = az - bz;
   return dx * dx + dz * dz;
 }
 
+// Shortest signed turn from heading b to heading a, in (-PI, PI].
+export function angleDiff(a, b) {
+  const wrapped = (((a - b + Math.PI) % TAU) + TAU) % TAU;
+  const d = wrapped - Math.PI;
+  return d === -Math.PI ? Math.PI : d;
+}
+
+export function wrapAngle(a) {
+  const wrapped = (((a + Math.PI) % TAU) + TAU) % TAU;
+  const r = wrapped - Math.PI;
+  return r === -Math.PI ? Math.PI : r;
+}
+
+function pad2(n) {
+  return n < 10 ? '0' + n : String(n);
+}
+
+function groupThousands(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
 export function fmtCash(n) {
-  const v = Math.round(n);
-  return '$' + v.toLocaleString('en-US');
+  return '$' + groupThousands(Math.round(n));
 }
 
 export function fmtTime(sec) {
-  const s = Math.max(0, Math.floor(sec));
-  const m = Math.floor(s / 60);
-  return String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+  const total = Math.max(0, Math.floor(sec));
+  return pad2(Math.floor(total / 60)) + ':' + pad2(total % 60);
 }
 
-// minutes since midnight -> "HH:MM"
+// Game-clock minutes since midnight -> "HH:MM".
 export function clockString(minutes) {
   const m = ((Math.floor(minutes) % 1440) + 1440) % 1440;
-  const h = Math.floor(m / 60);
-  return String(h).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  return pad2(Math.floor(m / 60)) + ':' + pad2(m % 60);
 }

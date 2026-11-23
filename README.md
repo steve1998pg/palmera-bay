@@ -4,28 +4,44 @@
 
 # PALMERA BAY
 
-An open-world crime game in the spirit of GTA 6, running entirely in a desktop browser from its own files. Golden hour over a fictional coastal city. Dante Cruz is back in Palmera Bay with $250, a borrowed pistol, and a debt to Celia "La Jefa" Duarte. Eight story jobs stand between him and the whole bay.
+A GTA-style open-world crime game that runs entirely in a desktop browser,
+straight from its own files. Golden hour over a fictional coastal city:
+Dante Cruz is back in Palmera Bay with $250, a borrowed pistol, and a debt
+to Celia "La Jefa" Duarte. Eight story jobs stand between him and the
+whole bay.
 
-## How to play
+## Play it
 
 ```bash
 node serve.ts
 # then open http://localhost:8080
 ```
 
-No build step, no network (three.js is vendored locally under `game/vendor/`). Keyboard + mouse.
+No build step and no network — three.js is vendored locally under
+`game/vendor/`. Keyboard + mouse.
 
-## Features
+## What is in the game
 
-- **A living city**: 960×960 m of streets, 8 districts, a beach, a pier, a clock tower, palms, billboards, traffic and pedestrians — all built deterministically from a seed (`?seed=7` by default).
-- **8 story jobs**: steal cars, clear Tiburon crews, win a 7-gate street race, survive a 90-second manhunt at wanted level 4, and take Sundial Square back to become Bay Boss.
-- **Driving**: arcade handling with drift handbrake, nitro, tuning, armour plating and resprays at Ibarra Customs.
-- **Wanted system**: heat, 5 stars, pursuing cruisers, foot cops, the AIR-1 helicopter with a spotlight, and roadblocks.
-- **Combat**: 5 weapons (fists, pistol, SMG, shotgun, rifle) with hitscan tracers, reloads and armour.
-- **Crew**: Nico (lose heat), Tomas (repair your car), Sofia (decoy flare that scatters the police).
-- **Side activities**: a $500 street race, 12 hidden stashes worth $150 each.
-- **Radio**: three fully synthesized WebAudio stations — Palmera FM, Radio Mango, Static Coast.
-- **Progression**: respect ranks from NOBODY to BAY BOSS, cash, saves (localStorage), and a completion percentage on the map screen.
+- **A living city** — 960×960 m of streets, 8 districts, a beach, a pier, a
+  clock tower, palms, billboards, traffic and pedestrians, all built
+  deterministically from a seed (`?seed=7` by default).
+- **8 story jobs** — steal cars, clear Tiburon crews, win a 7-gate street
+  race, survive a 90-second manhunt at wanted level 4, and take Sundial
+  Square back to become Bay Boss.
+- **Driving** — arcade handling with a drift handbrake, nitro, tuning,
+  armour plating and resprays at Ibarra Customs.
+- **Wanted system** — heat, 5 stars, pursuing cruisers, foot cops, the
+  AIR-1 helicopter with a spotlight, and roadblocks.
+- **Combat** — 5 weapons (fists, pistol, SMG, shotgun, rifle) with hitscan
+  tracers, reloads and armour.
+- **Crew** — Nico (lose heat), Tomas (repair your car), Sofia (decoy flare
+  that scatters the police).
+- **Side activities** — a $500 street race and 12 hidden stashes worth
+  $150 each.
+- **Radio** — three fully synthesized WebAudio stations: Palmera FM, Radio
+  Mango, Static Coast.
+- **Progression** — respect ranks from NOBODY to BAY BOSS, cash, saves in
+  localStorage, and a completion percentage on the map screen.
 
 ## Controls
 
@@ -41,15 +57,17 @@ No build step, no network (three.js is vendored locally under `game/vendor/`). K
 | Z / X / V | Nico / Tomas / Sofia |
 | M | Map & stats · P / Esc pause · C radio · G garage |
 
-## Technology
+## Tech
 
 - three.js r160 (vendored, `game/vendor/three.module.min.js`)
-- Plain ES modules, no build step, Node stdlib only for `serve.ts` / `main.ts`
+- Plain ES modules, no build step; Node stdlib only for `serve.ts` and `main.ts`
 - All music and sound effects are synthesized with WebAudio — no audio files
 
-## Layout
+## Repo layout
 
 - `game/index.html` + `game/css/style.css` — page and HUD
-- `game/src/` — one module per system: `city`, `player`, `police`, `missions`, `people`, `vehicles`, `audio`, `hud`, `input`, `save`, `shots`, `config`, `random`, `main`
+- `game/src/` — one module per system: `city`, `player`, `police`,
+  `missions`, `people`, `vehicles`, `audio`, `hud`, `input`, `save`,
+  `shots`, `config`, `random`, `main`
 - `main.ts` / `serve.ts` — dossier builder and static server
 - `screenshots/` — the 4 bounty screenshots

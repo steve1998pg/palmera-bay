@@ -1,14 +1,30 @@
 // Save / load for Palmera Bay. The save lives in localStorage under
-// SAVE_KEY and is written on job completion, game over, every 45 s of play,
-// and after standing quietly at the safehouse for 5 s. Loading is defensive:
-// a corrupt or mistyped save is ignored, never a crash.
+// SAVE_KEY and is written on job completion, on game over, every 45 s of
+// play, and after standing quietly at the safehouse for 5 s. Loading is
+// defensive: a corrupt or mistyped save is ignored, never a crash.
 import { SAVE_KEY } from './config.js';
+
+const DEFAULT_POS = { x: -336, z: 336 };
+const DEFAULT_CLOCK = 17 * 60 + 41;
+
+function finiteNumber(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function wholeIn(value, lo, hi, fallback) {
+  return Math.max(lo, Math.min(hi, Math.floor(finiteNumber(value, fallback))));
+}
+
+function objectOrNull(value) {
+  return value && typeof value === 'object' ? value : null;
+}
 
 export function makeSave(W) {
   const S = {};
 
-  S.collect = function () {
+  function snapshot() {
     const p = W.player;
+    const last = W.lastCar;
     return {
       cash: Math.round(p.cash),
       respect: Math.round(p.respect),
@@ -23,59 +39,81 @@ export function makeSave(W) {
       stats: JSON.parse(JSON.stringify(p.stats)),
       clockMinutes: Math.round(W.clockMinutes),
       stashesTaken: W.city.stashes.map((s) => !!s.taken),
-      carMods: W.lastCar ? {
-        type: W.lastCar.type, color: W.lastCar.color,
-        tuned: !!W.lastCar.tuned, plated: !!W.lastCar.plated,
-        nitro: !!W.lastCar.nitro, cond: Math.round(W.lastCar.cond),
-      } : null,
+      carMods: last
+        ? {
+            type: last.type,
+            color: last.color,
+            tuned: !!last.tuned,
+            plated: !!last.plated,
+            nitro: !!last.nitro,
+            cond: Math.round(last.cond),
+          }
+        : null,
       savedAt: new Date().toISOString(),
     };
-  };
+  }
+
+  S.collect = snapshot;
 
   S.write = function () {
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(S.collect()));
+      localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot()));
       return true;
-    } catch (e) {
+    } catch (err) {
       return false;
     }
   };
 
   S.read = function () {
     let raw = null;
-    try { raw = localStorage.getItem(SAVE_KEY); } catch (e) { return null; }
+    try {
+      raw = localStorage.getItem(SAVE_KEY);
+    } catch (err) {
+      return null;
+    }
     if (!raw) return null;
     let data = null;
-    try { data = JSON.parse(raw); } catch (e) { return null; }
+    try {
+      data = JSON.parse(raw);
+    } catch (err) {
+      return null;
+    }
     if (!data || typeof data !== 'object') return null;
-    // Validate the numeric fields; anything that is not a finite number is
-    // dropped back to a safe default instead of crashing the game.
-    const num = (v, dflt) => (typeof v === 'number' && Number.isFinite(v) ? v : dflt);
+    // Any numeric field that is not a finite number falls back to a safe
+    // default instead of crashing the game.
     return {
-      cash: num(data.cash, 250),
-      respect: num(data.respect, 0),
-      hp: num(data.hp, 100),
-      armour: num(data.armour, 0),
-      x: num(data.x, -336),
-      z: num(data.z, 336),
-      jobIndex: Math.max(0, Math.min(7, Math.floor(num(data.jobIndex, 0)))),
-      completedJobs: Math.max(0, Math.min(8, Math.floor(num(data.completedJobs, 0)))),
+      cash: finiteNumber(data.cash, 250),
+      respect: finiteNumber(data.respect, 0),
+      hp: finiteNumber(data.hp, 100),
+      armour: finiteNumber(data.armour, 0),
+      x: finiteNumber(data.x, DEFAULT_POS.x),
+      z: finiteNumber(data.z, DEFAULT_POS.z),
+      jobIndex: wholeIn(data.jobIndex, 0, 7, 0),
+      completedJobs: wholeIn(data.completedJobs, 0, 8, 0),
       weaponId: typeof data.weaponId === 'string' ? data.weaponId : 'pistol',
-      weapons: (data.weapons && typeof data.weapons === 'object') ? data.weapons : null,
-      stats: (data.stats && typeof data.stats === 'object') ? data.stats : null,
-      clockMinutes: num(data.clockMinutes, 17 * 60 + 41),
+      weapons: objectOrNull(data.weapons),
+      stats: objectOrNull(data.stats),
+      clockMinutes: finiteNumber(data.clockMinutes, DEFAULT_CLOCK),
       stashesTaken: Array.isArray(data.stashesTaken) ? data.stashesTaken : null,
-      carMods: (data.carMods && typeof data.carMods === 'object') ? data.carMods : null,
+      carMods: objectOrNull(data.carMods),
       savedAt: typeof data.savedAt === 'string' ? data.savedAt : '',
     };
   };
 
   S.exists = function () {
-    try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
+    try {
+      return !!localStorage.getItem(SAVE_KEY);
+    } catch (err) {
+      return false;
+    }
   };
 
   S.clear = function () {
-    try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+    try {
+      localStorage.removeItem(SAVE_KEY);
+    } catch (err) {
+      /* storage may be unavailable; nothing to clear */
+    }
   };
 
   return S;

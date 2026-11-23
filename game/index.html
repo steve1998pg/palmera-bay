@@ -1,156 +1,170 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Palmera Bay — Open World Crime</title>
-<link rel="stylesheet" href="css/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Palmera Bay — Open World Crime</title>
+  <link href="css/style.css" rel="stylesheet">
 </head>
 <body>
-<canvas id="game"></canvas>
-<div id="status" class="hidden"></div>
+  <canvas id="game"></canvas>
+  <div id="status" class="hidden"></div>
 
-<div id="hud" class="hidden">
-  <div id="mission-card">
-    <div id="mission-job">JOB 1/8</div>
-    <div id="mission-name"></div>
-    <div id="mission-timer" class="hidden">00:00</div>
-    <div id="mission-objective"></div>
-    <div id="mission-stage"></div>
-    <div id="mission-stage-fill"></div>
-    <div id="mission-next"><span id="mission-next-text"></span></div>
+  <!-- In-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="mission-card">
+      <div id="mission-job">JOB 1/8</div>
+      <div id="mission-name"></div>
+      <div id="mission-timer" class="hidden">00:00</div>
+      <div id="mission-objective"></div>
+      <div id="mission-stage"></div>
+      <div id="mission-stage-fill"></div>
+      <div id="mission-next"><span id="mission-next-text"></span></div>
+    </div>
+
+    <div id="dispatch" class="hidden">
+      <div id="dispatch-head">DISPATCH</div>
+      <div id="dispatch-units"><div id="dispatch-list"></div></div>
+      <div id="dispatch-foot"></div>
+    </div>
+
+    <div id="top-right">
+      <div id="clock-radio"><span id="clock">17:41</span> <span id="radio-now">PALMERA FM 98.6</span></div>
+      <div id="cash">$250</div>
+      <div id="stars">☆☆☆☆☆</div>
+      <div id="wanted-state">CLEAN</div>
+      <div id="rank-line"><span id="rank-badge">NOBODY</span> <span id="rank-name">NOBODY</span> <span id="respect-text">0 / 250</span></div>
+      <div id="respect-bar"><div id="respect-fill"></div></div>
+    </div>
+
+    <div id="weapons"></div>
+    <div id="crew"></div>
+
+    <div id="bottom-left">
+      <div id="district">
+        <div id="district-name">Palmera Bay</div>
+        <div id="district-sub"></div>
+      </div>
+      <canvas id="minimap" width="220" height="220"></canvas>
+      <div id="vitals">
+        <div class="bar"><div id="health-fill"></div><span id="health-num">100</span></div>
+        <div class="bar armour"><div id="armour-fill"></div><span id="armour-num">0</span></div>
+      </div>
+    </div>
+
+    <div id="bottom-right">
+      <div id="radio-line"><span id="radio-station">PALMERA FM 98.6</span> <span id="radio-song">♪ Golden Static</span></div>
+      <div id="vehicle-card" class="hidden">
+        <div id="vehicle-name"></div>
+        <div id="vehicle-cond"><div id="cond-fill"></div><span id="cond-num">100</span></div>
+        <div id="speed"><span id="speed-num">0</span> <span id="speed-unit">km/h</span></div>
+      </div>
+    </div>
+
+    <div id="dialogue" class="hidden">
+      <div id="dialogue-portrait">?</div>
+      <div id="dialogue-body">
+        <div id="dialogue-who"></div>
+        <div id="dialogue-text"></div>
+        <div id="dialogue-hint">Click or press E to continue</div>
+      </div>
+    </div>
+
+    <div id="crosshair" class="hidden">+</div>
+    <div id="prompt" class="hidden"></div>
+    <div id="wanted-flash" class="hidden">WANTED</div>
+    <div id="notify" class="hidden"></div>
+    <div id="objective-toast" class="hidden"></div>
+    <div id="damage-vignette" class="hidden"></div>
   </div>
 
-  <div id="dispatch" class="hidden">
-    <div id="dispatch-head">DISPATCH</div>
-    <div id="dispatch-units"><div id="dispatch-list"></div></div>
-    <div id="dispatch-foot"></div>
-  </div>
-
-  <div id="top-right">
-    <div id="clock-radio"><span id="clock">17:41</span> <span id="radio-now">PALMERA FM 98.6</span></div>
-    <div id="cash">$250</div>
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="wanted-state">CLEAN</div>
-    <div id="rank-line"><span id="rank-badge">NOBODY</span> <span id="rank-name">NOBODY</span> <span id="respect-text">0 / 250</span></div>
-    <div id="respect-bar"><div id="respect-fill"></div></div>
-  </div>
-
-  <div id="weapons"></div>
-  <div id="crew"></div>
-
-  <div id="bottom-left">
-    <div id="district"><div id="district-name">Palmera Bay</div><div id="district-sub"></div></div>
-    <canvas id="minimap" width="220" height="220"></canvas>
-    <div id="vitals">
-      <div class="bar"><div id="health-fill"></div><span id="health-num">100</span></div>
-      <div class="bar armour"><div id="armour-fill"></div><span id="armour-num">0</span></div>
+  <!-- Title screen -->
+  <div id="title-screen">
+    <div id="title-inner">
+      <div id="title-kicker">A PALMERA BAY STORY</div>
+      <h1 id="title-logo">PALMERA<br>BAY</h1>
+      <div id="title-tag">Golden hour. Bad debts. One last shot at the crown.</div>
+      <p id="title-story">Dante Cruz is back in Palmera Bay with $250, a borrowed pistol and a debt to Celia “La Jefa” Duarte. Eight jobs stand between him and the whole bay. Steal cars, outrun the PBPD, and take the city back — one sunset at a time.</p>
+      <div id="title-buttons">
+        <button id="btn-continue" class="hidden"><span>CONTINUE</span><span id="continue-label"></span></button>
+        <button id="btn-new">NEW GAME</button>
+        <button id="btn-how">HOW TO PLAY</button>
+      </div>
+      <div id="title-foot">Keyboard + mouse &middot; WASD drive &middot; E steal &middot; M map &middot; C radio</div>
+      <div id="title-save-note"></div>
     </div>
   </div>
 
-  <div id="bottom-right">
-    <div id="radio-line"><span id="radio-station">PALMERA FM 98.6</span> <span id="radio-song">♪ Golden Static</span></div>
-    <div id="vehicle-card" class="hidden">
-      <div id="vehicle-name"></div>
-      <div id="vehicle-cond"><div id="cond-fill"></div><span id="cond-num">100</span></div>
-      <div id="speed"><span id="speed-num">0</span> <span id="speed-unit">km/h</span></div>
+  <!-- How to play -->
+  <div id="howto" class="hidden">
+    <h2>HOW TO PLAY</h2>
+    <p>WASD / arrows — walk &amp; drive (camera relative) &middot; Mouse — look &amp; aim (click the game to lock the mouse)<br>
+    E — enter / steal a car, exit a car &middot; Space — jump / handbrake &middot; Shift — run / nitro<br>
+    Click / F — shoot / punch &middot; 1–5 — weapons &middot; Q — cycle weapon &middot; R — reload<br>
+    Z / X / V — Nico / Tomas / Sofia &middot; M — map &amp; stats &middot; P / Esc — pause &middot; C — radio &middot; G — garage at Ibarra Customs</p>
+    <p>Follow the yellow marker. Finish all 8 jobs to become Bay Boss. Grab glowing stashes for $150. Lose the cops by breaking line of sight.</p>
+    <button id="btn-how-close">CLOSE</button>
+  </div>
+
+  <!-- Pause / big map -->
+  <div id="pause-menu" class="hidden">
+    <div id="map-wrap">
+      <canvas id="bigmap" width="560" height="560"></canvas>
+      <div id="map-side">
+        <h2>PALMERA BAY</h2>
+        <div id="map-key">H safehouse &middot; G garage &middot; R race &middot; P precinct &middot; $ stash &middot; red number: next job</div>
+        <div id="map-stats"></div>
+        <div>Respect <b id="stat-respect">0</b></div>
+        <div>Cash <b id="stat-cash">$250</b></div>
+        <div>Jobs <b id="stat-jobs">0/8</b></div>
+        <div>Completion <b id="stat-complete">0%</b></div>
+        <div id="complete-bar"><div id="complete-fill"></div></div>
+      </div>
+    </div>
+    <div id="pause-buttons">
+      <button id="btn-resume">RESUME</button>
+      <button id="btn-save">SAVE</button>
+      <button id="btn-quit">QUIT TO TITLE</button>
     </div>
   </div>
 
-  <div id="dialogue" class="hidden">
-    <div id="dialogue-portrait">?</div>
-    <div id="dialogue-body"><div id="dialogue-who"></div><div id="dialogue-text"></div><div id="dialogue-hint">Click or press E to continue</div></div>
-  </div>
-
-  <div id="crosshair" class="hidden">+</div>
-  <div id="prompt" class="hidden"></div>
-  <div id="wanted-flash" class="hidden">WANTED</div>
-  <div id="notify" class="hidden"></div>
-  <div id="objective-toast" class="hidden"></div>
-  <div id="damage-vignette" class="hidden"></div>
-</div>
-
-<div id="title-screen">
-  <div id="title-inner">
-    <div id="title-kicker">A PALMERA BAY STORY</div>
-    <h1 id="title-logo">PALMERA<br>BAY</h1>
-    <div id="title-tag">Golden hour. Bad debts. One last shot at the crown.</div>
-    <p id="title-story">Dante Cruz is back in Palmera Bay with $250, a borrowed pistol and a debt to Celia “La Jefa” Duarte. Eight jobs stand between him and the whole bay. Steal cars, outrun the PBPD, and take the city back — one sunset at a time.</p>
-    <div id="title-buttons">
-      <button id="btn-continue" class="hidden"><span>CONTINUE</span><span id="continue-label"></span></button>
-      <button id="btn-new">NEW GAME</button>
-      <button id="btn-how">HOW TO PLAY</button>
+  <!-- Ibarra Customs shop -->
+  <div id="shop" class="hidden">
+    <div id="shop-left">
+      <h2>IBARRA CUSTOMS</h2>
+      <div id="shop-sub">Garage &amp; Guns — Tomas “Wrench” Ibarra</div>
+      <div id="shop-car-view"><canvas id="shop-car-canvas" width="340" height="170"></canvas></div>
+      <div id="shop-car-name"></div>
+      <div id="shop-car-cond"><div id="shop-cond-fill"></div><span id="shop-cond-num">100</span></div>
+      <div id="shop-mods"><span id="mod-tune">TUNE: NO</span> <span id="mod-plating">PLATING: NO</span> <span id="mod-nitro">NITRO: NO</span></div>
     </div>
-    <div id="title-foot">Keyboard + mouse &middot; WASD drive &middot; E steal &middot; M map &middot; C radio</div>
-    <div id="title-save-note"></div>
-  </div>
-</div>
-
-<div id="howto" class="hidden">
-  <h2>HOW TO PLAY</h2>
-  <p>WASD / arrows — walk &amp; drive (camera relative) &middot; Mouse — look &amp; aim (click the game to lock the mouse)<br>
-  E — enter / steal a car, exit a car &middot; Space — jump / handbrake &middot; Shift — run / nitro<br>
-  Click / F — shoot / punch &middot; 1–5 — weapons &middot; Q — cycle weapon &middot; R — reload<br>
-  Z / X / V — Nico / Tomas / Sofia &middot; M — map &amp; stats &middot; P / Esc — pause &middot; C — radio &middot; G — garage at Ibarra Customs</p>
-  <p>Follow the yellow marker. Finish all 8 jobs to become Bay Boss. Grab glowing stashes for $150. Lose the cops by breaking line of sight.</p>
-  <button id="btn-how-close">CLOSE</button>
-</div>
-
-<div id="pause-menu" class="hidden">
-  <div id="map-wrap">
-    <canvas id="bigmap" width="560" height="560"></canvas>
-    <div id="map-side">
-      <h2>PALMERA BAY</h2>
-      <div id="map-key">H safehouse &middot; G garage &middot; R race &middot; P precinct &middot; $ stash &middot; red number: next job</div>
-      <div id="map-stats"></div>
-      <div>Respect <b id="stat-respect">0</b></div>
-      <div>Cash <b id="stat-cash">$250</b></div>
-      <div>Jobs <b id="stat-jobs">0/8</b></div>
-      <div>Completion <b id="stat-complete">0%</b></div>
-      <div id="complete-bar"><div id="complete-fill"></div></div>
+    <div id="shop-right">
+      <div id="shop-cash">Cash <span id="shop-cash-num">$250</span></div>
+      <div id="shop-list"></div>
+      <div id="shop-list2"></div>
+      <div id="shop-desc"></div>
+      <button id="btn-shop-close">CLOSE [G]</button>
     </div>
   </div>
-  <div id="pause-buttons">
-    <button id="btn-resume">RESUME</button>
-    <button id="btn-save">SAVE</button>
-    <button id="btn-quit">QUIT TO TITLE</button>
+
+  <!-- Game over -->
+  <div id="gameover" class="hidden">
+    <h1 id="gameover-title">WASTED</h1>
+    <p id="gameover-text"></p>
+    <button id="btn-respawn">RESPAWN AT SAFEHOUSE</button>
   </div>
-</div>
 
-<div id="shop" class="hidden">
-  <div id="shop-left">
-    <h2>IBARRA CUSTOMS</h2>
-    <div id="shop-sub">Garage &amp; Guns — Tomas “Wrench” Ibarra</div>
-    <div id="shop-car-view"><canvas id="shop-car-canvas" width="340" height="170"></canvas></div>
-    <div id="shop-car-name"></div>
-    <div id="shop-car-cond"><div id="shop-cond-fill"></div><span id="shop-cond-num">100</span></div>
-    <div id="shop-mods"><span id="mod-tune">TUNE: NO</span> <span id="mod-plating">PLATING: NO</span> <span id="mod-nitro">NITRO: NO</span></div>
+  <!-- Job complete -->
+  <div id="job-done" class="hidden">
+    <h1 id="job-done-title">JOB COMPLETE</h1>
+    <p id="job-done-text"></p>
+    <p id="job-done-reward"></p>
+    <button id="btn-job-next">CONTINUE</button>
   </div>
-  <div id="shop-right">
-    <div id="shop-cash">Cash <span id="shop-cash-num">$250</span></div>
-    <div id="shop-list"></div>
-    <div id="shop-list2"></div>
-    <div id="shop-desc"></div>
-    <button id="btn-shop-close">CLOSE [G]</button>
-  </div>
-</div>
 
-<div id="gameover" class="hidden">
-  <h1 id="gameover-title">WASTED</h1>
-  <p id="gameover-text"></p>
-  <button id="btn-respawn">RESPAWN AT SAFEHOUSE</button>
-</div>
-
-<div id="job-done" class="hidden">
-  <h1 id="job-done-title">JOB COMPLETE</h1>
-  <p id="job-done-text"></p>
-  <p id="job-done-reward"></p>
-  <button id="btn-job-next">CONTINUE</button>
-</div>
-
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
-<script type="module" src="src/main.js"></script>
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>

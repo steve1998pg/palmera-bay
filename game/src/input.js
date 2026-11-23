@@ -1,7 +1,10 @@
-// Keyboard + mouse input. Tracks held keys by code, pointer-lock mouse
-// look, and a held-fire flag for the canvas. HUD buttons are plain DOM
-// clicks and never reach the canvas handler, so clicking a dialogue or a
-// button can never fire the weapon.
+// Keyboard + mouse input. Held keys are tracked by code, pointer-lock
+// mouse look accumulates a per-frame delta, and a held-fire flag tells the
+// player update when the trigger is down. HUD buttons are plain DOM clicks
+// and never reach the canvas handler, so clicking a dialogue or a button
+// can never fire the weapon.
+const SCROLL_KEYS = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
+
 export function makeInput(W) {
   const I = {
     keys: new Set(),
@@ -13,20 +16,23 @@ export function makeInput(W) {
 
   const canvas = W.canvas;
 
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    I.keys.add(e.code);
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
-      // Keep the page from scrolling while playing.
-      if (W.state === 'playing' || W.state === 'shop') e.preventDefault();
+  function onKey(e, pressed) {
+    if (pressed) {
+      if (e.repeat) return;
+      I.keys.add(e.code);
+      if (SCROLL_KEYS.includes(e.code) && (W.state === 'playing' || W.state === 'shop')) {
+        // Keep the page from scrolling while playing.
+        e.preventDefault();
+      }
+      W.audio.ensure();
+      W.onKeyDown(e.code);
+    } else {
+      I.keys.delete(e.code);
     }
-    W.audio.ensure();
-    W.onKeyDown(e.code);
-  });
+  }
 
-  window.addEventListener('keyup', (e) => {
-    I.keys.delete(e.code);
-  });
+  window.addEventListener('keydown', (e) => onKey(e, true));
+  window.addEventListener('keyup', (e) => onKey(e, false));
 
   window.addEventListener('blur', () => {
     I.keys.clear();
@@ -41,7 +47,9 @@ export function makeInput(W) {
     }
     try {
       if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
-    } catch (err) { /* pointer lock is optional */ }
+    } catch (err) {
+      /* pointer lock is optional */
+    }
   });
 
   window.addEventListener('mouseup', (e) => {
@@ -60,13 +68,20 @@ export function makeInput(W) {
 
   // Consume the accumulated mouse delta for this frame.
   I.takeMouse = function () {
-    const dx = I.mouseDX, dy = I.mouseDY;
-    I.mouseDX = 0; I.mouseDY = 0;
-    return { dx, dy };
+    const out = { dx: I.mouseDX, dy: I.mouseDY };
+    I.mouseDX = 0;
+    I.mouseDY = 0;
+    return out;
   };
 
-  I.down = function (code) { return I.keys.has(code); };
-  I.any = function (...codes) { return codes.some((c) => I.keys.has(c)); };
+  I.down = function (code) {
+    return I.keys.has(code);
+  };
+
+  I.any = function (...codes) {
+    for (const c of codes) if (I.keys.has(c)) return true;
+    return false;
+  };
 
   return I;
 }
