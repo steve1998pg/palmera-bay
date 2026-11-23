@@ -143,7 +143,7 @@ const world = {
       } else {
         const dead = player.heal(shot.damage);
         hud.damageFlash();
-        if (dead) busted();
+        if (dead) wasted();
       }
     }
   },
