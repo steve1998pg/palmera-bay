@@ -9,6 +9,10 @@ export const GIVERS = {
   sofia: { name: 'SOFIA “EYES” RIVAS', role: 'LOOKOUT · PALM HEIGHTS', initials: 'SR', color: '#fb7185' },
 };
 
+// Short display name for the mission card ("La Jefa" reads better than a full name).
+const GIVER_SHORT = { celia: 'La Jefa', tomas: 'Tomas', nico: 'Nico', sofia: 'Sofia' };
+export function giverShortName(giver) { return GIVER_SHORT[giver] || giver; }
+
 export const JOBS = [
   {
     id: 'first-wheels', name: 'FIRST WHEELS', giver: 'tomas',
@@ -86,6 +90,11 @@ export const JOBS = [
   },
 ];
 
+// "Clear the crew (2/5)" — the kill-stage label with the live count spliced in.
+function killLabel(stage, killsLeft) {
+  return stage.label.replace(/\(\d+\/\d+\)/, `(${stage.count - killsLeft}/${stage.count})`);
+}
+
 export class MissionManager {
   constructor(world) {
     this.world = world;
@@ -103,6 +112,7 @@ export class MissionManager {
   job() { return JOBS[this.jobIndex]; }
   stage() { const j = this.job(); return j ? j.stages[this.stageIndex] : null; }
   done() { return this.jobIndex >= JOBS.length; }
+  giver() { const j = this.job(); return j ? GIVERS[j.giver] : null; }
 
   startJob(index) {
     this.jobIndex = index;
@@ -110,6 +120,12 @@ export class MissionManager {
     this.active = true;
     this.failed = false;
     this._enterStage();
+  }
+
+  // Restart the current job from its first stage (fail / respawn path).
+  restartCurrentJob() {
+    if (this.done()) return;
+    this.startJob(this.jobIndex);
   }
 
   _enterStage() {
@@ -135,8 +151,7 @@ export class MissionManager {
       w.police.addHeat(78, w);
       w.hud.notify('FOUR STARS — the whole PBPD is coming for you', 'bad');
     }
-    const giver = GIVERS[job.giver];
-    w.hud.showDialogue(giver, st.say);
+    w.hud.showDialogue(this.giver(), st.say);
     w.hud.setMission(job, this.stageIndex, st);
     w.audio.blip(1046, 0.12, 'triangle', 0.15);
   }
@@ -177,14 +192,14 @@ export class MissionManager {
     w.hud.notify(reason + ' — job failed. Talk to La Jefa to try again.', 'bad');
     w.audio.busted();
     // Restart the same job after a beat.
-    setTimeout(() => { if (!w.paused) this.startJob(this.jobIndex); }, 1200);
+    setTimeout(() => { if (!w.paused) this.restartCurrentJob(); }, 1200);
   }
 
   onKill() {
     const st = this.stage();
     if (!st || st.type !== 'kill') return;
     this.killsLeft = Math.max(0, this.killsLeft - 1);
-    this.world.hud.setMission(this.job(), this.stageIndex, { ...st, label: st.label.replace(/\(\d+\/\d+\)/, `(${st.count - this.killsLeft}/${st.count})`) });
+    this.world.hud.setMission(this.job(), this.stageIndex, { ...st, label: killLabel(st, this.killsLeft) });
     if (this.killsLeft <= 0) this._advance();
   }
 

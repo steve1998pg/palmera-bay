@@ -2,6 +2,11 @@
 // explosions, UI blips and three radio stations sequenced live. No audio files, no network.
 import { STATIONS } from './config.js';
 
+// One siren wail cycle: 8 alternating notes, 0.45 s apart.
+const SIREN_NOTES = [660, 880];
+const SIREN_STEP = 0.45;
+const SIREN_CYCLE = SIREN_NOTES.length * 4 * SIREN_STEP;
+
 export class AudioEngine {
   constructor() {
     this.ctx = null;
@@ -13,9 +18,11 @@ export class AudioEngine {
     this.step = 0;
     this.nextStepTime = 0;
     this.engineOsc = null;
+    this.engineOsc2 = null;
     this.engineGain = null;
     this.sirenOsc = null;
     this.sirenGain = null;
+    this.sirenUntil = 0;
     this.muted = false;
   }
 
@@ -70,15 +77,19 @@ export class AudioEngine {
 
   setSiren(on, wanted) {
     if (!this.ctx) return;
-    this.sirenGain.gain.setTargetAtTime(on ? 0.028 + wanted * 0.006 : 0, this.ctx.currentTime, 0.3);
-    if (on) {
-      const t = this.ctx.currentTime;
-      this.sirenOsc.frequency.cancelScheduledValues(t);
-      this.sirenOsc.frequency.setValueAtTime(660, t);
-      for (let i = 0; i < 8; i++) {
-        this.sirenOsc.frequency.linearRampToValueAtTime(i % 2 ? 880 : 660, t + (i + 1) * 0.45);
-      }
+    const t = this.ctx.currentTime;
+    this.sirenGain.gain.setTargetAtTime(on ? 0.028 + wanted * 0.006 : 0, t, 0.3);
+    if (!on) { this.sirenUntil = 0; return; }
+    // Re-arm the wail only when the scheduled cycle has run out. The old code
+    // cancelled and re-planned all 8 notes every frame, so the siren never got
+    // past its first note and the scheduler did needless work 60× a second.
+    if (t < this.sirenUntil) return;
+    this.sirenOsc.frequency.cancelScheduledValues(t);
+    this.sirenOsc.frequency.setValueAtTime(SIREN_NOTES[0], t);
+    for (let i = 0; i < 8; i++) {
+      this.sirenOsc.frequency.linearRampToValueAtTime(SIREN_NOTES[(i + 1) % 2], t + (i + 1) * SIREN_STEP);
     }
+    this.sirenUntil = t + SIREN_CYCLE;
   }
 
   blip(freq = 880, dur = 0.07, type = 'square', vol = 0.12) {
@@ -91,18 +102,30 @@ export class AudioEngine {
     o.start(); o.stop(this.ctx.currentTime + dur + 0.02);
   }
 
+  // White-noise burst that decays as (1 - t)^power — gunfire, hats, snares, blasts.
+  _noiseBuffer(dur, power = 2) {
+    const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** power;
+    return buf;
+  }
+  _playNoise(buf, filterType, filterFreq, vol, dest) {
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const f = this.ctx.createBiquadFilter(); f.type = filterType; f.frequency.value = filterFreq;
+    const g = this.ctx.createGain(); g.gain.value = vol;
+    src.connect(f); f.connect(g); g.connect(dest || this.sfxGain);
+    return src;
+  }
+
   shot(kind = 'pistol') {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     const dur = kind === 'shotgun' ? 0.28 : kind === 'rifle' ? 0.22 : 0.12;
-    const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
-    const src = this.ctx.createBufferSource(); src.buffer = buf;
-    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass';
-    f.frequency.value = kind === 'rifle' ? 2600 : 1500;
-    const g = this.ctx.createGain(); g.gain.value = kind === 'shotgun' ? 0.5 : 0.32;
-    src.connect(f); f.connect(g); g.connect(this.sfxGain);
+    const src = this._playNoise(
+      this._noiseBuffer(dur),
+      'lowpass', kind === 'rifle' ? 2600 : 1500,
+      kind === 'shotgun' ? 0.5 : 0.32,
+    );
     src.start(t);
     this.blip(kind === 'rifle' ? 220 : 160, 0.08, 'square', 0.1);
   }
@@ -110,13 +133,7 @@ export class AudioEngine {
   explosion() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime, dur = 0.9;
-    const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 1.6;
-    const src = this.ctx.createBufferSource(); src.buffer = buf;
-    const f = this.ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 500;
-    const g = this.ctx.createGain(); g.gain.value = 0.8;
-    src.connect(f); f.connect(g); g.connect(this.sfxGain);
+    const src = this._playNoise(this._noiseBuffer(dur, 1.6), 'lowpass', 500, 0.8);
     src.start(t);
     const o = this.ctx.createOscillator(), og = this.ctx.createGain();
     o.type = 'sine'; o.frequency.setValueAtTime(90, t);
@@ -169,14 +186,8 @@ export class AudioEngine {
     }
     // Hat tick every other step.
     if (step % 2 === 0) {
-      const dur = 0.03;
-      const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-      const src = this.ctx.createBufferSource(); src.buffer = buf;
-      const f = this.ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
-      const g = this.ctx.createGain(); g.gain.value = step % 4 === 0 ? 0.16 : 0.08;
-      src.connect(f); f.connect(g); g.connect(this.musicGain); src.start(time);
+      const src = this._playNoise(this._noiseBuffer(0.03, 1), 'highpass', 6000, step % 4 === 0 ? 0.16 : 0.08, this.musicGain);
+      src.start(time);
     }
     // Lead: a little melody on steps 0,3,6,7,10,14 of each 16.
     const leadSteps = { 0: 0, 3: 2, 6: 4, 7: 3, 10: 5, 14: 4 };
@@ -186,14 +197,8 @@ export class AudioEngine {
     }
     // Snare-ish noise on step 4 and 12.
     if (step % 16 === 4 || step % 16 === 12) {
-      const dur = 0.09;
-      const buf = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * dur), this.ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 1.5;
-      const src = this.ctx.createBufferSource(); src.buffer = buf;
-      const f = this.ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800;
-      const g = this.ctx.createGain(); g.gain.value = 0.2;
-      src.connect(f); f.connect(g); g.connect(this.musicGain); src.start(time);
+      const src = this._playNoise(this._noiseBuffer(0.09, 1.5), 'bandpass', 1800, 0.2, this.musicGain);
+      src.start(time);
     }
   }
 }

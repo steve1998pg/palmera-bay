@@ -2,7 +2,7 @@
 // graph, and the pursuit steering police use. All original vehicle designs.
 import * as THREE from 'three';
 import { VEHICLE_TYPES, CAR_COLORS } from './config.js';
-import { pick, range, clamp, angleLerp } from './random.js';
+import { pick, range, clamp, angleDiff } from './random.js';
 
 export function specOf(type) {
   return VEHICLE_TYPES.find((v) => v.id === type) || VEHICLE_TYPES[0];
@@ -102,14 +102,23 @@ export function createCar(type, x, z, heading, colorHex, rng) {
   return car;
 }
 
+// Condition damage in one place: armour plating halves it, condition never
+// goes below 0. `factor` is the caller's damage multiplier (crash severity,
+// bullet vs. collision), applied before the plating discount.
+export function damageCar(car, dmg, factor = 1) {
+  const amount = dmg * factor * (car.plated ? 0.5 : 1);
+  car.cond = Math.max(0, car.cond - amount);
+  return amount;
+}
+// A car is a wreck once it is dead, burning, or at 0 condition.
+export function isWrecked(car) { return car.dead || car.burning || car.cond <= 0; }
+
 // Steer a car toward a point at up to maxSpeed; returns true when close.
 export function steerToward(car, tx, tz, dt, maxSpeed, reverseOk = true) {
   const dx = tx - car.x, dz = tz - car.z;
   const dist = Math.hypot(dx, dz);
   const want = Math.atan2(dx, dz);
-  let diff = want - car.heading;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
+  const diff = angleDiff(car.heading, want);
   const speedFac = clamp(Math.abs(car.speed) / 8, 0, 1);
   if (Math.abs(diff) > 2.2 && reverseOk && car.speed < 1) {
     car.speed = Math.max(car.speed - 14 * dt, -7);
@@ -131,8 +140,7 @@ export function moveCar(car, dt, city, onCrash) {
   car.x = hit.x; car.z = hit.z;
   if (hit.hit && impact > 4) {
     car.speed *= -0.25;
-    const dmg = (impact - 4) * (car.plated ? 0.35 : 0.7);
-    car.cond = Math.max(0, car.cond - dmg);
+    const dmg = damageCar(car, impact - 4, 0.7);
     if (onCrash) onCrash(dmg, impact);
   } else if (hit.hit) {
     car.speed *= 0.6;
@@ -211,8 +219,8 @@ export function collideCars(a, b) {
   const impact = Math.abs(a.speed - b.speed);
   const dmg = Math.max(0, impact - 3) * 0.55;
   if (dmg > 0) {
-    a.cond = Math.max(0, a.cond - dmg * (a.plated ? 0.5 : 1));
-    b.cond = Math.max(0, b.cond - dmg * (b.plated ? 0.5 : 1));
+    damageCar(a, dmg);
+    damageCar(b, dmg);
     const avg = (a.speed + b.speed) / 2;
     a.speed = avg * 0.55; b.speed = avg * 0.55;
   }

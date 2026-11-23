@@ -8,6 +8,10 @@ import { pick, range, clamp } from './random.js';
 const UNIT_NAMES = ['TARPON', 'GECKO', 'PELICAN', 'BARRACUDA', 'CORAL', 'MARLIN', 'TIDE', 'AZUL', 'REEF', 'DUNE'];
 const STAR_HEAT = [0, 12, 32, 52, 72, 90];
 const UNITS_FOR_STARS = [0, 2, 3, 4, 6, 8];
+// Sight ranges: a cruiser spots you from further than a cop on foot.
+const SIGHT_CAR = 62;
+const SIGHT_FOOT = 42;
+const HIDE_DELAY = 3; // seconds unseen before the state flips to "search"
 const _coneUp = new THREE.Vector3(0, 1, 0);
 const _coneDir = new THREE.Vector3();
 
@@ -69,6 +73,11 @@ export class PoliceSystem {
       world.audio.blip(660, 0.15, 'square', 0.15);
       setTimeout(() => world.audio.blip(880, 0.15, 'square', 0.15), 140);
     }
+  }
+  // Cool the heat down (crew abilities, respray) and re-derive the stars.
+  shedHeat(amount) {
+    this.heat = Math.max(0, this.heat - amount);
+    this._recalcStars();
   }
   _recalcStars() {
     let s = 0;
@@ -154,6 +163,27 @@ export class PoliceSystem {
     world.hud.notify('PBPD roadblock ahead — find another way!', 'bad');
   }
 
+  // Is any unit close enough to see the player? The heli always sees you.
+  _isPlayerSeen(p) {
+    for (const u of this.units) {
+      if (Math.hypot(u.x - p.x, u.z - p.z) < SIGHT_CAR) return true;
+    }
+    for (const c of this.footCops) {
+      if (!c.dead && Math.hypot(c.x - p.x, c.z - p.z) < SIGHT_FOOT) return true;
+    }
+    return !!this.heli;
+  }
+
+  // Grow the response toward what the current wanted level calls for.
+  _maintainStrength(world) {
+    const wantUnits = UNITS_FOR_STARS[this.wanted];
+    if (this.units.length < wantUnits) this._spawnUnit(world);
+    else if (this.wanted >= 2 && this.footCops.filter((c) => !c.dead).length < this.wanted - 1) this._spawnFootCop(world);
+    if (this.wanted >= 3 && !this.heli) this._spawnHeli(world);
+    if (this.wanted >= 4 && this.roadblocks.length === 0 && this.rng() < 0.4) this._spawnRoadblock(world);
+    this.spawnCd = 2.2;
+  }
+
   update(dt, world) {
     const p = world.playerPos();
     const player = world.player;
@@ -168,38 +198,24 @@ export class PoliceSystem {
       }
     }
     // --- visibility: any unit close, or the heli overhead ---
-    let seen = false;
-    for (const u of this.units) {
-      if (Math.hypot(u.x - p.x, u.z - p.z) < 62) { seen = true; break; }
-    }
-    if (!seen) for (const c of this.footCops) {
-      if (!c.dead && Math.hypot(c.x - p.x, c.z - p.z) < 42) { seen = true; break; }
-    }
-    if (this.heli) seen = true;
+    const seen = this._isPlayerSeen(p);
     if (seen) {
       this.unseenTimer = 0;
       this.lastSeen = { x: p.x, z: p.z };
       if (this.wanted > 0) this.state = 'sight';
     } else {
       this.unseenTimer += dt;
-      if (this.wanted > 0 && this.unseenTimer > 3) this.state = 'search';
+      if (this.wanted > 0 && this.unseenTimer > HIDE_DELAY) this.state = 'search';
     }
     // --- heat decay when hidden ---
-    if (this.wanted > 0 && !seen && this.unseenTimer > 3) {
+    if (this.wanted > 0 && !seen && this.unseenTimer > HIDE_DELAY) {
       this.heat -= dt * (this.wanted <= 2 ? 7 : 4.5);
       if (this.heat <= 0) { this.clearAll(world); world.hud.notify('You lost them. The heat is off — for now.', 'good'); }
       else this._recalcStars();
     }
     // --- spawn to strength ---
     this.spawnCd -= dt;
-    if (this.wanted > 0 && this.spawnCd <= 0) {
-      const wantUnits = UNITS_FOR_STARS[this.wanted];
-      if (this.units.length < wantUnits) this._spawnUnit(world);
-      else if (this.wanted >= 2 && this.footCops.filter((c) => !c.dead).length < this.wanted - 1) this._spawnFootCop(world);
-      if (this.wanted >= 3 && !this.heli) this._spawnHeli(world);
-      if (this.wanted >= 4 && this.roadblocks.length === 0 && this.rng() < 0.4) this._spawnRoadblock(world);
-      this.spawnCd = 2.2;
-    }
+    if (this.wanted > 0 && this.spawnCd <= 0) this._maintainStrength(world);
     if (this.wanted < 3) this._removeHeli();
     // --- police car pursuit ---
     for (let i = this.units.length - 1; i >= 0; i--) {

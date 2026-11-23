@@ -38,6 +38,13 @@ export const RANKS = [
   { name: 'BAY BOSS', need: 2600 },
 ];
 
+// The rank a respect total earns, its index, and the next rank (null at the top).
+export function rankFor(respect) {
+  let index = 0;
+  for (let i = 0; i < RANKS.length; i++) if (respect >= RANKS[i].need) index = i;
+  return { rank: RANKS[index], index, next: RANKS[index + 1] || null };
+}
+
 // Weapons: key, name, damage, range, fire interval, mag, price, unlock rank.
 export const WEAPONS = [
   { key: 1, id: 'fists', name: 'FISTS', dmg: 12, range: 2.6, rate: 0.38, mag: Infinity, price: 0, rank: 0, auto: false },
@@ -46,6 +53,8 @@ export const WEAPONS = [
   { key: 4, id: 'shotgun', name: '12G BREACHER', dmg: 70, range: 22, rate: 0.9, mag: 6, price: 2600, rank: 2, auto: false, pellets: 6 },
   { key: 5, id: 'rifle', name: 'HARRIER LR', dmg: 55, range: 110, rate: 0.55, mag: 20, price: 6800, rank: 3, auto: false },
 ];
+
+export function weaponDef(id) { return WEAPONS.find((w) => w.id === id); }
 
 // Vehicle models: name, top speed (m/s), accel, handling, price (showroom), colour palette.
 export const VEHICLE_TYPES = [
@@ -72,10 +81,11 @@ export const STATIONS = [
 ];
 
 // Crew abilities: key, name, role, cooldown seconds, description.
+// Keys are Z / X / V on purpose: C is the radio dial, so Sofia rides on V.
 export const CREW = [
   { key: 'z', id: 'nico', name: 'NICO VEGA', role: 'GETAWAY · DRIVER', cd: 45, desc: 'Nico swaps your plates — wanted drops one star instantly.' },
   { key: 'x', id: 'tomas', name: 'TOMAS “WRENCH” IBARRA', role: 'QUICK FIX · MECHANIC', cd: 60, desc: 'Tomas patches your ride back to full condition, wherever you are.' },
-  { key: 'c', id: 'sofia', name: 'SOFIA “EYES” RIVAS', role: 'DECOY · LOOKOUT', cd: 75, desc: 'Sofia fires a flare across town — every unit chases the decoy.' },
+  { key: 'v', id: 'sofia', name: 'SOFIA “EYES” RIVAS', role: 'DECOY · LOOKOUT', cd: 75, desc: 'Sofia fires a flare across town — every unit chases the decoy.' },
 ];
 
 // Shop catalogue.
@@ -93,6 +103,10 @@ export const SHOP_GEAR = [
   { id: 'ammo', tag: 'AMMO', name: 'AMMO, ALL GUNS', price: 200, desc: 'Full mags for every weapon you own.' },
   { id: 'vest', tag: 'VEST', name: 'BODY ARMOUR', price: 350, desc: 'Armour back to 100. Stops the first few mistakes.' },
 ];
+
+// Prices the shop code charges — one source of truth, same numbers as the catalogue.
+export const UPGRADE_PRICES = { repair: 250, respray: 400, tune: 2400, plating: 3600, nitro: 3200 };
+export const GEAR_PRICES = { smg: 1800, shotgun: 2600, rifle: 6800, ammo: 200, vest: 350 };
 
 export const START_CASH = 250;
 export const SAVE_KEY = 'palmera-bay-save-v1';

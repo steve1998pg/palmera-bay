@@ -6,6 +6,8 @@ import { pick, range, clamp } from './random.js';
 const SHIRTS = [0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6, 0x1abc9c, 0xecf0f1, 0xfd79a8, 0x00cec9, 0xe67e22];
 const SKINS = [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac];
 const PANTS = [0x2c3e50, 0x34495e, 0x5d4037, 0x1a1a2e, 0x4a4e69];
+// Health by kind — enemies take a little more, bystanders go down fast.
+const KIND_HP = { enemy: 60, cop: 50, ped: 30, player: 100 };
 
 function box(w, h, d, color, x, y, z) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
@@ -36,14 +38,14 @@ export function makePersonMesh(opts = {}) {
 export function createPerson(kind, x, z, rng, opts = {}) {
   const mesh = makePersonMesh(opts);
   mesh.position.set(x, 0, z);
+  const hp = KIND_HP[kind] ?? 30;
   const p = {
     kind, // 'ped' | 'enemy' | 'cop' | 'player'
     mesh,
     x, z,
     heading: rng ? rng() * Math.PI * 2 : 0,
     speed: 0,
-    hp: kind === 'enemy' ? 60 : kind === 'cop' ? 50 : 30,
-    maxHp: kind === 'enemy' ? 60 : kind === 'cop' ? 50 : 30,
+    hp, maxHp: hp,
     state: 'walk', // walk | flee | chase | shoot | down | drive
     target: null,
     shootCd: 0,
@@ -56,6 +58,23 @@ export function createPerson(kind, x, z, rng, opts = {}) {
   };
   mesh.userData.person = p;
   return p;
+}
+
+// Shared per-frame body work: walk-cycle swing, then move + collide + sync mesh.
+function animateWalk(p, dt) {
+  const u = p.mesh.userData;
+  u.walkPhase += p.speed * dt * 2.4;
+  const sw = Math.sin(u.walkPhase) * 0.5;
+  u.legL.rotation.x = sw; u.legR.rotation.x = -sw;
+  return sw;
+}
+function stepPerson(p, dt, city) {
+  p.x += Math.sin(p.heading) * p.speed * dt;
+  p.z += Math.cos(p.heading) * p.speed * dt;
+  const hit = city.resolveCircle(p.x, p.z, 0.5);
+  p.x = hit.x; p.z = hit.z;
+  p.mesh.position.set(p.x, 0, p.z);
+  p.mesh.rotation.y = p.heading;
 }
 
 // Pedestrian AI: stroll the sidewalks; flee from gunfire and speeding cars.
@@ -90,15 +109,8 @@ export function updatePed(p, dt, city, danger, rng) {
     p.speed = 1.6;
     u.armL.rotation.x = 0; u.armR.rotation.x = 0;
   }
-  p.x += Math.sin(p.heading) * p.speed * dt;
-  p.z += Math.cos(p.heading) * p.speed * dt;
-  const hit = city.resolveCircle(p.x, p.z, 0.5);
-  p.x = hit.x; p.z = hit.z;
-  p.mesh.position.set(p.x, 0, p.z);
-  p.mesh.rotation.y = p.heading;
-  u.walkPhase += p.speed * dt * 2.4;
-  const sw = Math.sin(u.walkPhase) * 0.5;
-  u.legL.rotation.x = sw; u.legR.rotation.x = -sw;
+  stepPerson(p, dt, city);
+  const sw = animateWalk(p, dt);
   if (p.state !== 'flee') { u.armL.rotation.x = -sw * 0.6; u.armR.rotation.x = sw * 0.6; }
 }
 
@@ -131,15 +143,8 @@ export function updateFighter(p, dt, playerPos, city, canShoot) {
       fired = true;
     }
   }
-  p.x += Math.sin(p.heading) * p.speed * dt;
-  p.z += Math.cos(p.heading) * p.speed * dt;
-  const hit = city.resolveCircle(p.x, p.z, 0.5);
-  p.x = hit.x; p.z = hit.z;
-  p.mesh.position.set(p.x, 0, p.z);
-  p.mesh.rotation.y = p.heading;
-  u.walkPhase += p.speed * dt * 2.4;
-  const sw = Math.sin(u.walkPhase) * 0.5;
-  u.legL.rotation.x = sw; u.legR.rotation.x = -sw;
+  stepPerson(p, dt, city);
+  animateWalk(p, dt);
   return fired ? { from: p, damage: p.kind === 'cop' ? 6 : 9, spread: 0.09 } : null;
 }
 

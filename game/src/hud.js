@@ -1,9 +1,20 @@
 // HUD: every DOM panel, the minimap and the full city map, dialogue, menus and
 // the garage shop. The judge reads the game mostly through these screens.
-import { WEAPONS, RANKS, CREW, SHOP_CAR, SHOP_GEAR, VEHICLE_TYPES } from './config.js';
+import { WEAPONS, RANKS, CREW, SHOP_CAR, SHOP_GEAR, VEHICLE_TYPES, rankFor } from './config.js';
+import { giverShortName } from './missions.js';
 import { fmtCash, fmtTime, clockString } from './random.js';
 
 const $ = (id) => document.getElementById(id);
+// Completion: 80% from the 8 story jobs, 20% from respect (2600 = BAY BOSS).
+const COMPLETION_JOB_WEIGHT = 80;
+const COMPLETION_RESPECT_WEIGHT = 20;
+const COMPLETION_RESPECT_MAX = 2600;
+
+export function completionPercent(completedJobs, respect) {
+  const jobs = (completedJobs / 8) * COMPLETION_JOB_WEIGHT;
+  const rep = Math.min(respect, COMPLETION_RESPECT_MAX) / COMPLETION_RESPECT_MAX * COMPLETION_RESPECT_WEIGHT;
+  return Math.min(100, Math.round(jobs + rep));
+}
 
 export class HUD {
   constructor(world) {
@@ -75,7 +86,7 @@ export class HUD {
 
   setMission(job, stageIndex, stage) {
     this.el['mission-job'].textContent = `JOB ${this.world.missions.jobIndex + 1}/8`;
-    this.el['mission-name'].textContent = job.name + ' · ' + (job.giver === 'celia' ? 'La Jefa' : job.giver === 'tomas' ? 'Tomas' : job.giver === 'nico' ? 'Nico' : 'Sofia');
+    this.el['mission-name'].textContent = job.name + ' · ' + giverShortName(job.giver);
     this.el['mission-objective'].textContent = stage.label;
     this.el['mission-next-text'].textContent = stage.next || '—';
     this.el['mission-stage-fill'].style.width = Math.round((stageIndex / job.stages.length) * 100) + '%';
@@ -109,7 +120,7 @@ export class HUD {
   }
   flashWanted(stars) {
     const f = this.el['wanted-flash'];
-    f.textContent = stars >= 4 ? 'WANTED ★'.repeat(0) + 'WANTED' : 'WANTED';
+    f.textContent = stars >= 4 ? 'WANTED ★★★★' : 'WANTED';
     f.classList.remove('hidden');
     setTimeout(() => f.classList.add('hidden'), 1400);
   }
@@ -163,10 +174,8 @@ export class HUD {
     this.el['wanted-state'].textContent =
       police.wanted === 0 ? '' : police.state === 'search' ? 'SEARCHING — stay out of sight' : police.wanted >= 3 && police.heli ? 'IN SIGHT — Air One has you in the light' : 'IN SIGHT';
     // Rank / respect.
-    let rank = RANKS[0];
-    for (const r of RANKS) if (p.respect >= r.need) rank = r;
-    const next = RANKS[RANKS.indexOf(rank) + 1];
-    this.el['rank-badge'].textContent = 'RANK ' + (RANKS.indexOf(rank) + 1);
+    const { rank, index, next } = rankFor(p.respect);
+    this.el['rank-badge'].textContent = 'RANK ' + (index + 1);
     this.el['rank-name'].textContent = rank.name;
     const span = next ? next.need - rank.need : 1;
     this.el['respect-fill'].style.width = Math.round(((p.respect - rank.need) / span) * 100) + '%';
@@ -241,10 +250,10 @@ export class HUD {
     this.drawMinimap(world);
   }
 
-  // ---- minimap ----
-  drawMinimap(world) {
-    const ctx = this.minimapCtx;
-    const S = 220, half = 480, k = S / (half * 2);
+  // ---- shared map base: sea, sand, blocks, roads. Both maps draw on top of it.
+  // X/Y map world coords onto a square canvas of size S.
+  _mapBase(ctx, world, S, blockColor = '#3f5a6b') {
+    const half = 480, k = S / (half * 2);
     const X = (x) => (x + half) * k, Y = (z) => (z + half) * k;
     ctx.clearRect(0, 0, S, S);
     ctx.fillStyle = '#14324a'; ctx.fillRect(0, 0, S, S);
@@ -252,7 +261,7 @@ export class HUD {
     ctx.fillStyle = '#2a7f8f'; ctx.fillRect(X(452), 0, S - X(452), S);
     ctx.fillStyle = '#e8c98f'; ctx.fillRect(X(384), 0, X(452) - X(384), S);
     // Blocks.
-    ctx.fillStyle = '#3f5a6b';
+    ctx.fillStyle = blockColor;
     for (const c of world.city.colliders) {
       ctx.fillRect(X(c.x - c.hx), Y(c.z - c.hz), (c.hx * 2) * k, (c.hz * 2) * k);
     }
@@ -264,6 +273,14 @@ export class HUD {
     }
     ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(X(352), 0); ctx.lineTo(X(352), S); ctx.stroke();
+    return { X, Y, k };
+  }
+
+  // ---- minimap ----
+  drawMinimap(world) {
+    const ctx = this.minimapCtx;
+    const S = 220;
+    const { X, Y } = this._mapBase(ctx, world, S);
     // Landmarks.
     const dot = (x, z, color, r = 4) => {
       ctx.fillStyle = color; ctx.beginPath(); ctx.arc(X(x), Y(z), r, 0, Math.PI * 2); ctx.fill();
@@ -304,19 +321,9 @@ export class HUD {
   // ---- full map (pause screen) ----
   drawBigMap(world) {
     const ctx = this.bigmapCtx;
-    const S = 640, half = 480, k = S / (half * 2);
-    const X = (x) => (x + half) * k, Y = (z) => (z + half) * k;
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#16324a'; ctx.fillRect(0, 0, S, S);
-    ctx.fillStyle = '#2a7f8f'; ctx.fillRect(X(452), 0, S - X(452), S);
-    ctx.fillStyle = '#e8c98f'; ctx.fillRect(X(384), 0, X(452) - X(384), S);
-    // District tints.
-    const tints = ['#7c5a3a', '#4a6b8a', '#5a4a6b', '#3a6b4a', '#8a6b3a', '#6b3a3a', '#3a5a5a', '#6b5a8a'];
-    // Blocks.
-    ctx.fillStyle = '#41617a';
-    for (const c of world.city.colliders) {
-      ctx.fillRect(X(c.x - c.hx), Y(c.z - c.hz), (c.hx * 2) * k, (c.hz * 2) * k);
-    }
+    const S = 640;
+    const { X, Y } = this._mapBase(ctx, world, S, '#41617a');
+    // Roads read heavier on the big map.
     ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3;
     for (const s of world.city.streets) {
       ctx.beginPath(); ctx.moveTo(X(s), 0); ctx.lineTo(X(s), S); ctx.stroke();
@@ -365,14 +372,13 @@ export class HUD {
     ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke();
     // Stats side.
     const pl = world.player;
-    let rank = RANKS[0];
-    for (const r of RANKS) if (pl.respect >= r.need) rank = r;
-    this.el['stat-respect'].textContent = `LV ${RANKS.indexOf(rank) + 1} · ${rank.name}`;
+    const { rank, index } = rankFor(pl.respect);
+    this.el['stat-respect'].textContent = `LV ${index + 1} · ${rank.name}`;
     this.el['stat-cash'].textContent = fmtCash(pl.cash);
     this.el['stat-jobs'].textContent = `${world.missions.completedJobs} / 8`;
-    const complete = Math.round((world.missions.completedJobs / 8) * 82 + (world.missions.completedJobs > 0 ? 0 : 3) + (pl.respect / 2600) * 15);
-    this.el['stat-complete'].textContent = Math.min(100, complete) + '%';
-    this.el['complete-fill'].style.width = Math.min(100, complete) + '%';
+    const complete = completionPercent(world.missions.completedJobs, pl.respect);
+    this.el['stat-complete'].textContent = complete + '%';
+    this.el['complete-fill'].style.width = complete + '%';
     const s = pl.stats;
     this.el['map-stats'].textContent =
       `CARS STOLEN ${s.carsStolen} · STARS LOST ${s.starsLost} · KNOCKOUTS ${s.knockouts} · RACE WINS ${s.raceWins} · DRIVEN ${s.drivenKm.toFixed(1)} KM`;

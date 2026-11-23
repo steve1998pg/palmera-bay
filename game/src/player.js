@@ -1,11 +1,15 @@
 // The player on foot: third-person movement, jumping, punching, hitscan gunplay
 // with tracers, carjacking, and the weapon inventory. Original character: Dante Cruz.
 import * as THREE from 'three';
-import { WEAPONS } from './config.js';
+import { WEAPONS, weaponDef } from './config.js';
 import { clamp } from './random.js';
 import { makePersonMesh, damagePerson } from './people.js';
 
 const START_AMMO = { pistol: 60, smg: 120, shotgun: 24, rifle: 40 };
+const RELOAD_SECONDS = 0.9;
+// Health regen: 7 s out of combat, then 2.2 HP/s.
+const REGEN_DELAY = 7;
+const REGEN_RATE = 2.2;
 
 // 2D ray vs AABB slab test — bullets stop at buildings.
 function rayHitBuilding(ox, oz, dx, dz, city, maxDist) {
@@ -64,8 +68,7 @@ export class Player {
     this.raycaster = new THREE.Raycaster();
   }
 
-  weapon() { return WEAPONS.find((w) => w.id === this.weaponId); }
-  rankIndex() { return 0; }
+  weapon() { return weaponDef(this.weaponId); }
 
   giveWeapon(id) {
     if (this.weapons[id]) { this.weapons[id].owned = true; this.weapons[id].reserve = START_AMMO[id] ?? 0; }
@@ -75,7 +78,8 @@ export class Player {
       if (this.weapons[id].owned && START_AMMO[id]) this.weapons[id].reserve = START_AMMO[id];
     }
   }
-  heal(dmg) {
+  // Take a hit: armour absorbs 60% of it first. Returns true if it killed you.
+  takeDamage(dmg) {
     const absorbed = Math.min(this.armour, dmg * 0.6);
     this.armour -= absorbed;
     this.hp = Math.max(0, this.hp - (dmg - absorbed));
@@ -84,7 +88,7 @@ export class Player {
   }
 
   switchWeapon(id) {
-    const w = WEAPONS.find((x) => x.id === id);
+    const w = weaponDef(id);
     if (w && this.weapons[id].owned) { this.weaponId = id; this.reloadTimer = 0; return true; }
     return false;
   }
@@ -94,6 +98,25 @@ export class Player {
     this.weaponId = owned[(i + 1) % owned.length].id;
     this.reloadTimer = 0;
   }
+  // Start a reload — only when the mag is short and there is reserve ammo.
+  // (The old R key started a 0.9 s lockout even with a full mag.)
+  startReload() {
+    if (this.inCar || this.reloadTimer > 0) return false;
+    const w = this.weapon();
+    const slot = this.weapons[w.id];
+    if (w.id === 'fists' || slot.mag >= w.mag || slot.reserve <= 0) return false;
+    this.reloadTimer = RELOAD_SECONDS;
+    return true;
+  }
+  _finishReload() {
+    const w = this.weapon();
+    const slot = this.weapons[w.id];
+    if (slot.reserve !== Infinity) {
+      const need = w.mag - slot.mag;
+      const take = Math.min(need, slot.reserve);
+      slot.mag += take; slot.reserve -= take;
+    } else slot.mag = w.mag;
+  }
 
   // --- shooting ---
   tryShoot(camera, world) {
@@ -101,10 +124,10 @@ export class Player {
     if (this.fireCd > 0 || this.reloadTimer > 0 || this.inCar) return;
     if (w.id !== 'fists') {
       const slot = this.weapons[w.id];
-      if (slot.mag <= 0) { this.reloadTimer = 0.9; world.audio.blip(220, 0.1, 'square', 0.12); return; }
+      if (slot.mag <= 0) { this.reloadTimer = RELOAD_SECONDS; world.audio.blip(220, 0.1, 'square', 0.12); return; }
       slot.mag -= 1;
       this.stats.shotsFired += 1;
-      if (slot.mag === 0) this.reloadTimer = 0.9;
+      if (slot.mag === 0) this.reloadTimer = RELOAD_SECONDS;
     }
     this.fireCd = w.rate;
     this._fire(camera, world, w);
@@ -121,17 +144,14 @@ export class Player {
       const bDist = rayHitBuilding(origin.x, origin.z, dir.x, dir.z, world.city, maxD);
       let hitDist = Math.min(bDist, maxD);
       let hitObj = null;
-      // Shootable people and cars.
+      // Shootable people and cars — raycaster returns hits nearest-first.
       const targets = [];
       for (const p of world.people) if (!p.dead && p.mesh.visible) targets.push(p.mesh);
       for (const c of world.cars) if (!c.dead) targets.push(c.mesh);
       const hits = this.raycaster.intersectObjects(targets, true);
-      for (const h of hits) {
-        if (h.distance < hitDist) {
-          hitDist = h.distance;
-          hitObj = h.object;
-        }
-        break; // first hit only
+      if (hits.length > 0 && hits[0].distance < hitDist) {
+        hitDist = hits[0].distance;
+        hitObj = hits[0].object;
       }
       const end = new THREE.Vector3(
         origin.x + dir.x * hitDist,
@@ -190,14 +210,15 @@ export class Player {
     this.punchCd = 0.45;
     world.audio.punch();
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    const dmg = weaponDef('fists').dmg;
     for (const p of world.people) {
       if (p.dead || p.kind === 'player') continue;
       const dx = p.x - this.x, dz = p.z - this.z;
       const d = Math.hypot(dx, dz);
       if (d < 2.4 && dx * fx + dz * fz > 0) {
-        const killed = damagePerson(p, 12);
+        const killed = damagePerson(p, dmg);
         p.x += fx * 0.8; p.z += fz * 0.8;
-        world.onPersonShot(p, killed, 12);
+        world.onPersonShot(p, killed, dmg);
         break;
       }
     }
@@ -249,20 +270,12 @@ export class Player {
     this.punchCd = Math.max(0, this.punchCd - dt);
     if (this.reloadTimer > 0) {
       this.reloadTimer -= dt;
-      if (this.reloadTimer <= 0) {
-        const w = this.weapon();
-        const slot = this.weapons[w.id];
-        if (slot.reserve !== Infinity) {
-          const need = w.mag - slot.mag;
-          const take = Math.min(need, slot.reserve);
-          slot.mag += take; slot.reserve -= take;
-        } else slot.mag = w.mag;
-      }
+      if (this.reloadTimer <= 0) this._finishReload();
     }
     // Slow health regen out of combat.
     const now = performance.now() / 1000;
-    if (now - this.lastDamageAt > 7 && this.hp > 0 && this.hp < 100) {
-      this.hp = Math.min(100, this.hp + 2.2 * dt);
+    if (now - this.lastDamageAt > REGEN_DELAY && this.hp > 0 && this.hp < 100) {
+      this.hp = Math.min(100, this.hp + REGEN_RATE * dt);
     }
     for (const k of Object.keys(this.crewCd)) this.crewCd[k] = Math.max(0, this.crewCd[k] - dt);
     this.updateTracers(dt);

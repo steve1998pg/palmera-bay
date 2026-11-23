@@ -2,13 +2,23 @@
 // stats and where you stood. Nothing leaves the browser.
 import { SAVE_KEY } from './config.js';
 
+const SAVE_VERSION = 1;
+
 export function hasSave() {
   try { return !!localStorage.getItem(SAVE_KEY); } catch { return false; }
 }
+
+// A save only counts if it parses and looks like ours — a half-written or
+// foreign value under the same key must not crash the boot path.
 export function readSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (!s || typeof s !== 'object') return null;
+    if (typeof s.cash !== 'number' || typeof s.jobIndex !== 'number') return null;
+    if (!Number.isFinite(s.cash) || !Number.isFinite(s.jobIndex)) return null;
+    return s;
   } catch { return null; }
 }
 export function saveLabel() {
@@ -20,6 +30,7 @@ export function writeSave(world) {
   try {
     const p = world.player;
     const data = {
+      version: SAVE_VERSION,
       savedAt: Date.now(),
       cash: p.cash, respect: p.respect,
       hp: p.hp, armour: p.armour,

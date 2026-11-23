@@ -4,6 +4,7 @@
 // short stretch of real play looks like, and the same seed always gives the same frame.
 import { createCar } from './vehicles.js';
 import { damagePerson } from './people.js';
+import { GIVERS } from './missions.js';
 
 function setCashRespect(world, cash, respect) {
   world.player.cash = cash;
@@ -43,7 +44,7 @@ export function stageChase(world) {
   });
   world.police._spawnHeli(world);
   world.hud.showDialogue(
-    { name: 'CELIA “LA JEFA” DUARTE', role: 'FIXER · MARINA ROW', initials: 'CJ', color: '#f59e0b' },
+    GIVERS.celia,
     'The boat sails in two minutes, Dante! Shake that chopper and get to the pier!',
   );
   world.hud.objectiveToast('MISSION 6 · GOLDEN HOUR', 'LOSE THE MANHUNT BEFORE THE BOAT SAILS');
@@ -71,7 +72,7 @@ export function stageStreet(world) {
   world.police.addHeat(34, world);
   world.police._spawnFootCop(world);
   world.hud.showDialogue(
-    { name: 'CELIA “LA JEFA” DUARTE', role: 'FIXER · MARINA ROW', initials: 'CJ', color: '#f59e0b' },
+    GIVERS.celia,
     'Two down the left aisle! I’ve got the stall side, Dante.',
   );
   // One real shot, fired through the real gun code, for the tracer.

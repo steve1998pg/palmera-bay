@@ -1,12 +1,12 @@
 // PALMERA BAY — bootstrap, game loop, camera, interaction, and the world object
 // every system shares. An original open-world crime game in the spirit of GTA 6.
 import * as THREE from 'three';
-import { WORLD, START_CASH, VEHICLE_TYPES } from './config.js';
-import { mulberry32, clamp, pick, range } from './random.js';
+import { WORLD, START_CASH, VEHICLE_TYPES, CREW, UPGRADE_PRICES, GEAR_PRICES } from './config.js';
+import { mulberry32, clamp, pick, range, angleDiff } from './random.js';
 import { Input } from './input.js';
 import { AudioEngine } from './audio.js';
 import { buildCity } from './city.js';
-import { createCar, drivePlayerCar, updateTrafficCar, collideCars } from './vehicles.js';
+import { createCar, drivePlayerCar, updateTrafficCar, collideCars, isWrecked } from './vehicles.js';
 import { createPerson, updatePed, updateFighter, damagePerson } from './people.js';
 import { Player } from './player.js';
 import { PoliceSystem } from './police.js';
@@ -18,6 +18,12 @@ import { stageShot } from './shots.js';
 const params = new URLSearchParams(location.search);
 const SHOT = params.get('shot');
 const SEED = parseInt(params.get('seed') || '7', 10) || 7;
+// Interaction radii: entering a car, the garage, the race, the safehouse save.
+const ENTER_CAR_R = 4;
+const GARAGE_R = 16;
+const RACE_R = 14;
+const SAFEHOUSE_R = 12;
+const SAVE_AT_SAFEHOUSE_S = 5;
 
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
@@ -127,7 +133,7 @@ const world = {
     spawnFireball(car.x, car.z);
     if (car === player.inCar) {
       exitCar(true);
-      if (player.heal(30)) wasted();
+      if (player.takeDamage(30)) wasted();
       hud.notify('Your ride just blew up!', 'bad');
     }
   },
@@ -141,7 +147,7 @@ const world = {
       if (player.inCar) {
         player.inCar.cond = Math.max(0, player.inCar.cond - shot.damage * 0.4);
       } else {
-        const dead = player.heal(shot.damage);
+        const dead = player.takeDamage(shot.damage);
         hud.damageFlash();
         if (dead) wasted();
       }
@@ -167,11 +173,11 @@ const world = {
   },
   buyUpgrade(id) {
     const p = player, car = hud.shopCar;
-    const price = { repair: 250, respray: 400, tune: 2400, plating: 3600, nitro: 3200 }[id];
+    const price = UPGRADE_PRICES[id];
     if (!car || p.cash < price) { hud.notify('Not enough cash.', 'bad'); return; }
     p.cash -= price;
     if (id === 'repair') car.cond = 100;
-    if (id === 'respray') { car.color = pick(rng, [0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6, 0xecf0f1]); car.mesh.children[0].material.color.setHex(car.color); this.police.heat = Math.max(0, this.police.heat - 20); }
+    if (id === 'respray') { car.color = pick(rng, [0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6, 0xecf0f1]); car.mesh.children[0].material.color.setHex(car.color); this.police.shedHeat(20); }
     if (id === 'tune') car.tuned = true;
     if (id === 'plating') car.plated = true;
     if (id === 'nitro') { car.nitro = true; car.nitroFuel = 100; }
@@ -181,7 +187,7 @@ const world = {
   },
   buyGear(id) {
     const p = player;
-    const price = { smg: 1800, shotgun: 2600, rifle: 6800, ammo: 200, vest: 350 }[id];
+    const price = GEAR_PRICES[id];
     if (p.cash < price) { hud.notify('Not enough cash.', 'bad'); return; }
     p.cash -= price;
     if (id === 'ammo') p.refillAmmo();
@@ -223,13 +229,13 @@ const world = {
   quitToTitle() { location.reload(); },
   respawn() {
     hud.hideGameOver();
-    player.hp = 100; player.armour = Math.max(0, player.armour);
+    player.hp = 100;
     player.x = city.locations.safehouse.x; player.z = city.locations.safehouse.z;
     player.inCar = null; this.playerCar = null;
     player.mesh.visible = true;
     this.police.clearAll(this);
     this.state = 'playing';
-    if (this.missions.active) this.missions.startJob(this.missions.jobIndex);
+    if (this.missions.active) this.missions.restartCurrentJob();
   },
 };
 
@@ -346,7 +352,7 @@ function exitCar(exploded) {
 function nearestCar(maxD) {
   let best = null, bd = maxD;
   for (const c of world.cars) {
-    if (c.dead || c.burning) continue;
+    if (isWrecked(c)) continue;
     const d = Math.hypot(c.x - player.x, c.z - player.z);
     if (d < bd) { bd = d; best = c; }
   }
@@ -371,27 +377,28 @@ function wasted() {
   world.saveGame();
 }
 
-// Crew abilities.
+// Crew abilities. Cooldowns come from CREW in config.js; keys are Z / X / V
+// (C is the radio dial — the old code bound Sofia to C too, so her decoy
+// could never fire: pressing C only changed the station).
 function useCrew(id) {
   const p = player;
   if (p.crewCd[id] > 0) return;
+  const def = CREW.find((c) => c.id === id);
   if (id === 'nico') {
     if (police.wanted === 0) { hud.hint('No heat to lose right now.'); return; }
-    p.crewCd.nico = 45;
-    police.heat = Math.max(0, police.heat - 26);
-    police._recalcStars();
+    p.crewCd.nico = def.cd;
+    police.shedHeat(26);
     hud.notify('Nico swapped your plates — one star gone.', 'good');
   } else if (id === 'tomas') {
     const car = p.inCar || world.lastCar;
     if (!car) { hud.hint('No car to fix.'); return; }
-    p.crewCd.tomas = 60;
+    p.crewCd.tomas = def.cd;
     car.cond = 100;
     hud.notify('Tomas patched your ride — good as new.', 'good');
   } else if (id === 'sofia') {
     if (police.wanted === 0) { hud.hint('No heat to lose right now.'); return; }
-    p.crewCd.sofia = 75;
-    police.heat = Math.max(0, police.heat - 45);
-    police._recalcStars();
+    p.crewCd.sofia = def.cd;
+    police.shedHeat(45);
     // Every unit chases the decoy flare across town.
     const a = rng() * Math.PI * 2;
     const dx = p.x + Math.sin(a) * 160, dz = p.z + Math.cos(a) * 160;
@@ -406,7 +413,7 @@ function useCrew(id) {
 function tryStartRace() {
   const L = city.locations.raceStart;
   const p = world.playerPos();
-  if (Math.hypot(p.x - L.x, p.z - L.z) > 14 || !player.inCar) return false;
+  if (Math.hypot(p.x - L.x, p.z - L.z) > RACE_R || !player.inCar) return false;
   if (player.cash < 500) { hud.notify('The race costs $500 to enter.', 'bad'); return true; }
   player.cash -= 500;
   const points = [[352, -320], [352, -40], [352, 220], [288, 288], [96, 288], [96, 96], [352, 96]];
@@ -461,10 +468,7 @@ function updateCamera(dt) {
   const moving = target.speed > 2;
   if (moving && !input.mouseDown && !input.locked) {
     const want = Math.atan2(Math.sin(target.heading), Math.cos(target.heading));
-    let diff = want - world.camYaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    world.camYaw += diff * Math.min(1, dt * (player.inCar ? 1.6 : 2.4));
+    world.camYaw += angleDiff(world.camYaw, want) * Math.min(1, dt * (player.inCar ? 1.6 : 2.4));
   }
   const dist = player.inCar ? 10.5 : input.mouseDown ? 5 : 7.5;
   const height = 2.6 + world.camPitch * 5;
@@ -486,6 +490,34 @@ let lastT = performance.now();
 let hudT = 0, safehouseT = 0, autosaveT = 0;
 let shotFrames = 0;
 let shotSettled = false;
+
+// Context prompts (steal / garage / race / safehouse) and the safehouse save.
+// One place for both on-foot and in-car, so the two branches can't drift apart.
+function updatePrompts(dt) {
+  const L = city.locations;
+  const pp = world.playerPos();
+  const nearGarage = Math.hypot(pp.x - L.garage.x, pp.z - L.garage.z) < GARAGE_R;
+  const nearRace = Math.hypot(pp.x - L.raceStart.x, pp.z - L.raceStart.z) < RACE_R;
+  const nearSafehouse = Math.hypot(pp.x - L.safehouse.x, pp.z - L.safehouse.z) < SAFEHOUSE_R;
+  if (world.state !== 'playing') { hud.setPrompt(null); return; }
+  if (!player.inCar) {
+    const car = nearestCar(ENTER_CAR_R);
+    if (car) hud.setPrompt(`<b>E</b> STEAL ${car.spec.name}`);
+    else if (nearGarage) hud.setPrompt('<b>G</b> IBARRA CUSTOMS — GARAGE & GUNS');
+    else if (nearRace) hud.setPrompt('<b>E</b> STREET RACE — $500 ENTRY · WIN $1,200');
+    else if (nearSafehouse) hud.setPrompt('SAFEHOUSE — PROGRESS SAVED');
+    else hud.setPrompt(null);
+    if (nearSafehouse) {
+      safehouseT += dt;
+      if (safehouseT > SAVE_AT_SAFEHOUSE_S) { world.saveGame(); safehouseT = 0; }
+    }
+  } else {
+    if (nearGarage) hud.setPrompt('<b>G</b> IBARRA CUSTOMS — GARAGE & GUNS');
+    else if (nearRace) hud.setPrompt('<b>E</b> STREET RACE — $500 ENTRY · WIN $1,200');
+    else hud.setPrompt(null);
+  }
+  if (nearRace && input.pressed('KeyE')) tryStartRace();
+}
 
 function step(dt) {
   if (world.paused) return;
@@ -510,7 +542,7 @@ function step(dt) {
     if (input.mouseDown) player.tryShoot(camera, world);
     if (input.pressed('KeyF')) player.punch(world);
     if (input.pressed('KeyE')) {
-      const car = nearestCar(4);
+      const car = nearestCar(ENTER_CAR_R);
       if (car) world.enterCar(car);
     }
   }
@@ -522,9 +554,10 @@ function step(dt) {
     }
   }
   if (input.pressed('KeyQ')) player.cycleWeapon();
-  if (input.pressed('KeyR') && !player.inCar) player.reloadTimer = 0.9;
+  if (input.pressed('KeyR')) player.startReload();
   if (input.pressed('KeyZ')) useCrew('nico');
   if (input.pressed('KeyX')) useCrew('tomas');
+  if (input.pressed('KeyV')) useCrew('sofia');
   if (input.pressed('KeyC')) {
     const st = audio.cycleStation();
     hud.notify(`♪ ${st.name} — ${st.song}`, 'good');
@@ -532,32 +565,14 @@ function step(dt) {
   if (input.pressed('KeyG')) {
     const L = city.locations.garage;
     const pp = world.playerPos();
-    if (Math.hypot(pp.x - L.x, pp.z - L.z) < 16) {
+    if (Math.hypot(pp.x - L.x, pp.z - L.z) < GARAGE_R) {
       world.shopOpen = true;
       world.state = 'shop';
       hud.openShop(world, player.inCar || world.lastCar);
     }
   }
-  // Prompts.
-  if (world.state === 'playing' && !player.inCar) {
-    const car = nearestCar(4);
-    const L = city.locations;
-    const pp = world.playerPos();
-    if (car) hud.setPrompt(`<b>E</b> STEAL ${car.spec.name}`);
-    else if (Math.hypot(pp.x - L.garage.x, pp.z - L.garage.z) < 16) hud.setPrompt('<b>G</b> IBARRA CUSTOMS — GARAGE & GUNS');
-    else if (Math.hypot(pp.x - L.raceStart.x, pp.z - L.raceStart.z) < 14) hud.setPrompt('<b>E</b> STREET RACE — $500 ENTRY · WIN $1,200');
-    else if (Math.hypot(pp.x - L.safehouse.x, pp.z - L.safehouse.z) < 12) hud.setPrompt('SAFEHOUSE — PROGRESS SAVED');
-    else hud.setPrompt(null);
-    if (Math.hypot(pp.x - L.raceStart.x, pp.z - L.raceStart.z) < 14 && input.pressed('KeyE')) tryStartRace();
-    if (Math.hypot(pp.x - L.safehouse.x, pp.z - L.safehouse.z) < 12) { safehouseT += dt; if (safehouseT > 5) { world.saveGame(); safehouseT = 0; } }
-  } else if (world.state === 'playing' && player.inCar) {
-    const L = city.locations;
-    const pp = world.playerPos();
-    if (Math.hypot(pp.x - L.garage.x, pp.z - L.garage.z) < 16) hud.setPrompt('<b>G</b> IBARRA CUSTOMS — GARAGE & GUNS');
-    else if (Math.hypot(pp.x - L.raceStart.x, pp.z - L.raceStart.z) < 14) hud.setPrompt('<b>E</b> STREET RACE — $500 ENTRY · WIN $1,200');
-    else hud.setPrompt(null);
-    if (Math.hypot(pp.x - L.raceStart.x, pp.z - L.raceStart.z) < 14 && input.pressed('KeyE')) tryStartRace();
-  } else hud.setPrompt(null);
+  // Prompts + safehouse save.
+  updatePrompts(dt);
   // Dialogue advance.
   if (input.pressed('KeyE') || input.consumeClick()) hud.hideDialogue();
   // Traffic + collisions.

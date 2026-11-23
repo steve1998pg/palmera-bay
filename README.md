@@ -38,7 +38,7 @@ Static files only, no network request, no build step. Desktop Chrome, keyboard +
 - **Combat** — fists, pistol, SMG, shotgun and long rifle; hitscan gunplay with
   tracers, muzzle flashes and exploding cars.
 - **Crew abilities** — Nico swaps your plates (Z), Tomas patches your ride (X),
-  Sofia fires a decoy flare (C).
+  Sofia fires a decoy flare (V).
 - **HUD with minimap** — mission card, PBPD dispatch panel, weapon slots, wanted
   stars, respect ranks, health/armour, speedometer, radio and a full city map (M).
 - **Ibarra Customs** — repair, respray, tune, armour plating, nitro, guns, ammo
@@ -57,9 +57,9 @@ Static files only, no network request, no build step. Desktop Chrome, keyboard +
 | Space | Jump · handbrake in a car |
 | Shift | Sprint · nitro (if fitted) |
 | Click / F | Shoot / punch |
-| 1–5, Q, R | Weapons · cycle · reload |
-| Z X C | Crew: getaway · repair · decoy |
-| M | City map & stats |
+| 1–5, Q, R | Weapons · cycle · reload (R only reloads when the mag is short) |
+| Z X V | Crew: getaway · repair · decoy |
+| M | City map & stats (completion: 80% jobs + 20% respect) |
 | P / Esc | Pause |
 | C | Change radio station |
 | G | Garage, at Ibarra Customs |
@@ -71,7 +71,9 @@ Static files only, no network request, no build step. Desktop Chrome, keyboard +
 - Vanilla ES modules, split by job: `city`, `vehicles`, `people`, `player`,
   `police`, `missions`, `hud`, `audio`, `save`, `shots`, `main`.
 - `?shot=chase|street|garage|map&seed=1` stages deterministic screenshot scenes
-  through the game’s own systems (see `shots.json`).
+  through the game’s own systems (see `shots.json`). The city layout, stash
+  spots and screenshots are deterministic for a given seed — `city.js` builds
+  its sections in a fixed order so the seeded RNG stream never shifts.
 - `main.ts` hands the game in: it copies `game/` + `screenshots/` to `/output`
   and writes `dossier.json` with the kit’s `vendor/makefun-game.ts`.
 

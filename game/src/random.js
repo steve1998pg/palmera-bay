@@ -13,13 +13,16 @@ export function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
 export function range(rng, min, max) { return min + rng() * (max - min); }
 export function rangeInt(rng, min, max) { return Math.floor(range(rng, min, max + 1)); }
 export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+export function clamp01(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 export function lerp(a, b, t) { return a + (b - a) * t; }
-export function angleLerp(a, b, t) {
+// Shortest signed turn from heading a to heading b, in (-PI, PI].
+export function angleDiff(a, b) {
   let d = (b - a) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
+  return d;
 }
+export function angleLerp(a, b, t) { return a + angleDiff(a, b) * t; }
 export function dist2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz; }
 export function fmtCash(n) { return '$' + Math.floor(n).toLocaleString('en-US'); }
 export function fmtTime(sec) {
