@@ -1,5 +1,8 @@
 # 🌅 PALMERA BAY
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/steve1998pg/palmera-bay/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/steve1998pg/palmera-bay/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![make.fun bounty](https://img.shields.io/badge/make.fun-GTA%206%20bounty-f59e0b)](https://make.fun/bounty/gta6-01)
 [![license: MIT](https://img.shields.io/badge/license-MIT-14b8a6)](LICENSE)
 [![play offline](https://img.shields.io/badge/play-offline%20in%20Chrome-38bdf8)](https://github.com/steve1998pg/palmera-bay)
