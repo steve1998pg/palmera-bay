@@ -1,265 +1,295 @@
-// Story: eight jobs for La Jefa, from a first repo to owning the bay, plus the
-// street race and the stashes scattered around town. All original characters.
+// Missions: the 8 story jobs, the side street race, and the stash pickups.
+// Stage types: go / collect / deliver / steal / kill / race / survive.
+// The active stage shows a world marker, a HUD mission card, and a line of
+// dialogue from the job giver.
+import { JOBS, GIVERS, RACE_SIDE } from './config.js';
 import { clamp } from './random.js';
 
-export const GIVERS = {
-  celia: { name: 'CELIA “LA JEFA” DUARTE', role: 'FIXER · MARINA ROW', initials: 'CJ', color: '#f59e0b' },
-  tomas: { name: 'TOMAS “WRENCH” IBARRA', role: 'MECHANIC · IBARRA CUSTOMS', initials: 'TI', color: '#14b8a6' },
-  nico: { name: 'NICO VEGA', role: 'DRIVER · GETAWAY', initials: 'NV', color: '#38bdf8' },
-  sofia: { name: 'SOFIA “EYES” RIVAS', role: 'LOOKOUT · PALM HEIGHTS', initials: 'SR', color: '#fb7185' },
-};
+export function makeMissions(W) {
+  const M = {
+    jobIndex: 0, stageIndex: 0,
+    killsLeft: 0, killsTotal: 0, killsDone: 0,
+    completedJobs: 0, active: false,
+    targetCar: null,
+    race: null, // {checkpoints, idx, timeLeft, jobRace, side}
+    surviveLeft: 0,
+    failAt: 0, failJob: -1,
+    stageTimer: 0,
+  };
 
-// Short display name for the mission card ("La Jefa" reads better than a full name).
-const GIVER_SHORT = { celia: 'La Jefa', tomas: 'Tomas', nico: 'Nico', sofia: 'Sofia' };
-export function giverShortName(giver) { return GIVER_SHORT[giver] || giver; }
+  M.job = function () { return JOBS[M.jobIndex] || null; };
+  M.stage = function () {
+    const j = M.job();
+    if (!j) return null;
+    return j.stages[M.stageIndex] || null;
+  };
 
-export const JOBS = [
-  {
-    id: 'first-wheels', name: 'FIRST WHEELS', giver: 'tomas',
-    brief: 'Tomas needs wheels and you need work. Borrow a coupe, bring it home.',
-    reward: 800, respect: 150,
-    stages: [
-      { type: 'go', x: 340, z: 96, label: 'Go to Ibarra Customs in Marina Row', next: 'Meet Tomas', say: 'Dante! Good, you came. I need a Comet RS — there’s one parked on the boulevard. Bring it to me, no scratches. Well — few scratches.' },
-      { type: 'steal', x: 352, z: -40, car: 'coupe', label: 'Steal the Veloz Comet RS', next: 'Lose nobody — just drive', say: 'There it is, red as a sunset. Get in, get out. The owner’s still at lunch.' },
-      { type: 'deliver', x: 340, z: 96, label: 'Deliver the Comet to Ibarra Customs', next: 'Get paid', say: 'You drive like my abuela — careful! Bring it around back.' },
-    ],
-  },
-  {
-    id: 'repo-rodeo', name: 'REPO RODEO', giver: 'celia',
-    brief: 'A Meridian GT in Palm Heights belongs to a man who owes La Jefa. Take it.',
-    reward: 1600, respect: 220,
-    stages: [
-      { type: 'steal', x: 288, z: 288, car: 'sport', label: 'Steal the Meridian GT in Palm Heights', next: 'The PBPD will notice', say: 'The GT is parked outside the big house on the hill. Its owner owes me forty thousand. You owe me your life. Fair trade — take the car.' },
-      { type: 'deliver', x: 500, z: 200, label: 'Deliver the GT to the pier — lose the police', next: 'Paco is waiting at the boat', say: 'The boys in blue will want a word. Don’t give them one. Paco’s boat leaves when you arrive.' },
-    ],
-  },
-  {
-    id: 'market-squeeze', name: 'MARKET SQUEEZE', giver: 'nico',
-    brief: 'The Tiburon crew is taxing every stall at Mercado Verde. Clear them out.',
-    reward: 2400, respect: 300,
-    stages: [
-      { type: 'kill', count: 5, x: 120, z: 352, label: 'Clear the Tiburon crew from the market (0/5)', next: 'Grab the stash', say: 'Five of them, counting the lookout. The stall owners are family, Dante — keep the people behind you.' },
-      { type: 'collect', x: 96, z: 300, label: 'Collect the stash behind the flower stall', next: 'Bring it to Celia', say: 'They keep the week’s take behind the flowers. Take it. Consider it a tip.' },
-    ],
-  },
-  {
-    id: 'dockside-ambush', name: 'DOCKSIDE AMBUSH', giver: 'sofia',
-    brief: 'A Tiburon shipment lands at Saltflats Port tonight. Take the van, take the port.',
-    reward: 3200, respect: 380,
-    stages: [
-      { type: 'kill', count: 7, x: -80, z: -400, label: 'Clear the Tiburon crew from the docks (0/7)', next: 'Take their van', say: 'Seven guards, two containers, one van full of things that fell off a boat. Eyes on the cranes — they like high ground.' },
-      { type: 'steal', x: -80, z: -360, car: 'van', label: 'Take the Tiburon cargo van', next: 'Drive it home', say: 'The van’s yours. Don’t stop for the gate — there is no gate anymore.' },
-      { type: 'deliver', x: -336, z: 336, label: 'Deliver the van to the safehouse', next: 'Get paid', say: 'Safehouse, west end. Park it behind the wall and walk away like you own the street.' },
-    ],
-  },
-  {
-    id: 'high-tide', name: 'HIGH TIDE', giver: 'nico',
-    brief: 'A boulevard race at dusk, seven checkpoints, one very fast tide of traffic.',
-    reward: 4000, respect: 450,
-    stages: [
-      { type: 'race', time: 150, points: [[352, -320], [352, -120], [352, 80], [352, 280], [288, 288], [96, 288], [96, 96]], label: 'Hit every checkpoint before the clock dies', next: 'Seven gates, one winner', say: 'Seven gates down the boulevard and back. The tide comes in at 150 seconds — be past the last gate or be a memory.' },
-    ],
-  },
-  {
-    id: 'golden-hour', name: 'GOLDEN HOUR', giver: 'celia',
-    brief: 'Four stars, ninety seconds, one boat. The whole PBPD wants you tonight.',
-    reward: 5200, respect: 520,
-    stages: [
-      { type: 'survive', time: 90, wanted: 4, label: 'Survive the manhunt — 90 seconds', next: 'Then run for the pier', say: 'They know your face now, Dante. Ninety seconds of hell, then the boat. Break line of sight and breathe.' },
-      { type: 'go', x: 500, z: 200, label: 'Reach the boat at the pier', next: 'Sail away clean', say: 'The boat sails when you step on. Shake that chopper and get to the pier!' },
-    ],
-  },
-  {
-    id: 'long-way-home', name: 'THE LONG WAY HOME', giver: 'tomas',
-    brief: 'Three drops across the city in one borrowed car, with the PBPD on your tail.',
-    reward: 6500, respect: 600,
-    stages: [
-      { type: 'deliver', x: 0, z: 0, label: 'Drop 1/3 — Sundial Square', next: 'Two more drops', say: 'Three packages, three corners of the bay. The car is borrowed, the cops are not. First stop: the square.' },
-      { type: 'deliver', x: -288, z: -288, label: 'Drop 2/3 — Old Cannery', next: 'One more drop', say: 'One down. The cannery next — mind the forklifts, they bite.' },
-      { type: 'deliver', x: 288, z: -288, label: 'Drop 3/3 — Calle Verde', next: 'Bring the car back', say: 'Last one, Calle Verde. Then the car comes home. Try to bring all of it.' },
-    ],
-  },
-  {
-    id: 'bay-boss', name: 'BAY BOSS', giver: 'celia',
-    brief: 'The Tiburons hold Sundial Square tonight. Take it back, and the bay is yours.',
-    reward: 20000, respect: 900,
-    stages: [
-      { type: 'kill', count: 8, x: -48, z: -48, label: 'Take Sundial Square back (0/8)', next: 'Then the pier', say: 'Eight of them hold the square. Tonight the square holds them — in the ground. After this, Dante, the bay is yours.' },
-      { type: 'go', x: 500, z: 200, label: 'Meet La Jefa at the pier — the finale', next: 'Own Palmera Bay', say: 'It’s done. Meet me at the pier and watch the sun go down on your city.' },
-    ],
-  },
-];
-
-// "Clear the crew (2/5)" — the kill-stage label with the live count spliced in.
-function killLabel(stage, killsLeft) {
-  return stage.label.replace(/\(\d+\/\d+\)/, `(${stage.count - killsLeft}/${stage.count})`);
-}
-
-export class MissionManager {
-  constructor(world) {
-    this.world = world;
-    this.jobIndex = 0;
-    this.stageIndex = 0;
-    this.stageTimer = 0;
-    this.racePoint = 0;
-    this.killsLeft = 0;
-    this.targetCar = null;
-    this.active = false;
-    this.completedJobs = 0;
-    this.failed = false;
+  function showStageDialog(stage) {
+    const job = M.job();
+    if (!job || !stage.say) return;
+    const giver = GIVERS[job.giver];
+    W.showDialog(giver.name, stage.say, giver.color, giver.initials);
   }
 
-  job() { return JOBS[this.jobIndex]; }
-  stage() { const j = this.job(); return j ? j.stages[this.stageIndex] : null; }
-  done() { return this.jobIndex >= JOBS.length; }
-  giver() { const j = this.job(); return j ? GIVERS[j.giver] : null; }
-
-  startJob(index) {
-    this.jobIndex = index;
-    this.stageIndex = 0;
-    this.active = true;
-    this.failed = false;
-    this._enterStage();
-  }
-
-  // Restart the current job from its first stage (fail / respawn path).
-  restartCurrentJob() {
-    if (this.done()) return;
-    this.startJob(this.jobIndex);
-  }
-
-  _enterStage() {
-    const st = this.stage();
-    const job = this.job();
-    if (!st || !job) return;
-    this.stageTimer = st.time || 0;
-    this.racePoint = 0;
-    const w = this.world;
-    w.clearMarker();
-    if (st.type === 'go' || st.type === 'deliver' || st.type === 'collect') {
-      w.setMarker(st.x, st.z, st.label);
-    } else if (st.type === 'steal') {
-      this.targetCar = w.spawnTargetCar(st.car, st.x, st.z);
-      w.setMarker(st.x, st.z, st.label);
-    } else if (st.type === 'kill') {
-      this.killsLeft = st.count;
-      w.spawnEnemies(st.count, st.x, st.z, this.job().id);
-      w.setMarker(st.x, st.z, st.label);
-    } else if (st.type === 'race') {
-      w.setMarker(st.points[0][0], st.points[0][1], st.label);
-    } else if (st.type === 'survive') {
-      w.police.addHeat(78, w);
-      w.hud.notify('FOUR STARS — the whole PBPD is coming for you', 'bad');
-    }
-    w.hud.showDialogue(this.giver(), st.say);
-    w.hud.setMission(job, this.stageIndex, st);
-    w.audio.blip(1046, 0.12, 'triangle', 0.15);
-  }
-
-  _advance() {
-    const job = this.job();
-    this.stageIndex += 1;
-    if (this.stageIndex >= job.stages.length) {
-      this._completeJob();
+  M.startJob = function (i) {
+    M.jobIndex = i;
+    M.stageIndex = 0;
+    M.active = true;
+    M.race = null;
+    M.surviveLeft = 0;
+    M.clearTargetCar();
+    if (i >= JOBS.length) {
+      M.active = false;
+      W.notify('PALMERA BAY IS YOURS');
       return;
     }
-    this._enterStage();
-  }
+    M.beginStage();
+    const job = M.job();
+    W.toast('NEW JOB \u2014 ' + job.name);
+  };
 
-  _completeJob() {
-    const job = this.job();
-    const w = this.world;
-    w.player.cash += job.reward;
-    w.player.respect += job.respect;
-    this.completedJobs += 1;
-    w.clearMarker();
-    w.audio.missionDone();
-    w.hud.showJobDone(job);
-    w.saveGame();
-    this.jobIndex += 1;
-    this.active = false;
-    if (!this.done()) {
-      setTimeout(() => { if (!w.paused) this.startJob(this.jobIndex); }, 100);
+  M.restartCurrentJob = function () {
+    M.startJob(M.jobIndex);
+  };
+
+  M.clearTargetCar = function () {
+    if (M.targetCar) {
+      M.targetCar.targetCar = false;
+      M.targetCar = null;
+    }
+  };
+
+  M.beginStage = function () {
+    const stage = M.stage();
+    if (!stage) return;
+    M.stageTimer = 0;
+    M.race = null;
+    M.killsLeft = 0; M.killsTotal = 0; M.killsDone = 0;
+    W.city.clearMarker();
+    if (stage.type === 'kill') {
+      M.killsTotal = stage.count;
+      M.killsLeft = stage.count;
+      W.spawnEnemies(stage.count, stage.x, stage.z, M.job().id);
+      W.city.setMarker(stage.x, stage.z, stage.label);
+    } else if (stage.type === 'steal') {
+      const car = W.spawnTargetCar(stage.carType, stage.x, stage.z);
+      M.targetCar = car;
+      W.city.setMarker(stage.x, stage.z, stage.label);
+    } else if (stage.type === 'race') {
+      M.race = {
+        checkpoints: stage.checkpoints.map(([x, z]) => ({ x, z, done: false })),
+        idx: 0, timeLeft: stage.time, jobRace: true, side: false,
+      };
+      const cp = M.race.checkpoints[0];
+      W.city.setMarker(cp.x, cp.z, 'Checkpoint 1/' + M.race.checkpoints.length);
+    } else if (stage.type === 'survive') {
+      M.surviveLeft = stage.time;
+      W.police.setHeat(Math.min(100, W.police.heat + (stage.heat || 0)));
+      W.city.clearMarker();
     } else {
-      w.hud.notify('PALMERA BAY IS YOURS — every job done. You are the Bay Boss.', 'gold');
+      W.city.setMarker(stage.x, stage.z, stage.label);
     }
-  }
+    showStageDialog(stage);
+    W.hudDirty = true;
+  };
 
-  failJob(reason) {
-    const w = this.world;
-    this.failed = true;
-    w.clearMarker();
-    w.hud.notify(reason + ' — job failed. Talk to La Jefa to try again.', 'bad');
-    w.audio.busted();
-    // Restart the same job after a beat.
-    setTimeout(() => { if (!w.paused) this.restartCurrentJob(); }, 1200);
-  }
+  M.advanceStage = function () {
+    const job = M.job();
+    if (!job) return;
+    M.stageIndex++;
+    if (M.stageIndex >= job.stages.length) {
+      M.completeJob();
+      return;
+    }
+    M.beginStage();
+  };
 
-  onKill() {
-    const st = this.stage();
-    if (!st || st.type !== 'kill') return;
-    this.killsLeft = Math.max(0, this.killsLeft - 1);
-    this.world.hud.setMission(this.job(), this.stageIndex, { ...st, label: killLabel(st, this.killsLeft) });
-    if (this.killsLeft <= 0) this._advance();
-  }
+  M.completeJob = function () {
+    const job = M.job();
+    if (!job) return;
+    W.player.cash += job.reward;
+    W.player.respect += job.respect;
+    M.completedJobs++;
+    W.audio.missionDone();
+    W.city.clearMarker();
+    M.clearTargetCar();
+    W.showJobDone(job);
+    const next = M.jobIndex + 1;
+    if (next >= JOBS.length) {
+      M.jobIndex = next;
+      M.active = false;
+      M.stageIndex = 0;
+      W.notify('PALMERA BAY IS YOURS');
+    } else {
+      M.jobIndex = next;
+      M.stageIndex = 0;
+      M.active = true;
+      M.beginStage();
+    }
+    // Save AFTER the job index has moved, so CONTINUE resumes at the
+    // next job instead of replaying the one just finished.
+    W.save.write();
+    W.hudDirty = true;
+  };
 
-  update(dt, world) {
-    if (!this.active || this.done()) return;
-    const st = this.stage();
-    if (!st) return;
-    const p = world.playerPos();
-    const inCar = !!world.player.inCar;
-    if (st.time) {
-      this.stageTimer -= dt;
-      world.hud.setTimer(this.stageTimer);
-      if (this.stageTimer <= 0) {
-        if (st.type === 'race') { this.failJob('Out of time on the race'); return; }
-        if (st.type === 'survive') { this._advance(); return; }
+  M.failJob = function (reason) {
+    W.notify('JOB FAILED \u2014 ' + (reason || 'try again'));
+    M.failAt = W.now + 1.2;
+    M.failJob = M.jobIndex;
+    M.active = false;
+    W.city.clearMarker();
+    M.clearTargetCar();
+  };
+
+  // Called when a mission enemy dies.
+  M.onMissionKill = function (tag) {
+    const job = M.job();
+    if (!job || !M.active) return;
+    const stage = M.stage();
+    if (!stage || stage.type !== 'kill') return;
+    if (tag !== job.id) return;
+    M.killsLeft = Math.max(0, M.killsLeft - 1);
+    M.killsDone = M.killsTotal - M.killsLeft;
+    W.hudDirty = true;
+    if (M.killsLeft <= 0) M.advanceStage();
+  };
+
+  // Called when the player enters a car.
+  M.onEnterCar = function (car) {
+    const stage = M.stage();
+    if (M.active && stage && stage.type === 'steal' && car === M.targetCar) {
+      W.notify('Car stolen \u2014 get it to the drop');
+      M.advanceStage();
+    }
+  };
+
+  M.startSideRace = function () {
+    const p = W.player;
+    if (p.cash < RACE_SIDE.entry) {
+      W.notify('You need $500 to enter the race');
+      return false;
+    }
+    p.cash -= RACE_SIDE.entry;
+    M.race = {
+      checkpoints: RACE_SIDE.checkpoints.map(([x, z]) => ({ x, z, done: false })),
+      idx: 0, timeLeft: RACE_SIDE.time, jobRace: false, side: true,
+    };
+    const cp = M.race.checkpoints[0];
+    W.city.setMarker(cp.x, cp.z, 'Checkpoint 1/' + M.race.checkpoints.length);
+    W.toast('STREET RACE \u2014 first to the last gate wins');
+    W.showDialog('NICO VEGA', 'Five hundred in, twelve hundred out. Do not bin my car, Dante.', '#38bdf8', 'NV');
+    return true;
+  };
+
+  M.finishRace = function (won) {
+    const wasSide = M.race && M.race.side;
+    M.race = null;
+    W.city.clearMarker();
+    if (won) {
+      if (wasSide) {
+        W.player.cash += RACE_SIDE.winCash;
+        W.player.respect += RACE_SIDE.winRespect;
+        W.player.stats.raceWins++;
+        W.notify('RACE WON \u2014 +$1,200');
+        W.audio.missionDone();
+      } else {
+        M.advanceStage();
+      }
+    } else if (!wasSide) {
+      M.failJob('Out of time');
+    } else {
+      W.notify('Race lost \u2014 entry fee gone');
+    }
+  };
+
+  M.update = function (dt, now) {
+    // Delayed job restart after a failure.
+    if (M.failJob >= 0 && now >= M.failAt) {
+      const j = M.failJob;
+      M.failJob = -1;
+      M.startJob(j);
+    }
+    if (!M.active) {
+      // A side race can run outside jobs.
+      if (M.race && M.race.side) M.updateRace(dt);
+      return;
+    }
+    const stage = M.stage();
+    if (!stage) return;
+    const pp = W.playerPos();
+    if (stage.type === 'go') {
+      if (Math.hypot(pp.x - stage.x, pp.z - stage.z) < 9) M.advanceStage();
+    } else if (stage.type === 'collect') {
+      if (Math.hypot(pp.x - stage.x, pp.z - stage.z) < 6) {
+        W.player.cash += 300;
+        W.notify('Stash collected \u2014 +$300');
+        M.advanceStage();
+      }
+    } else if (stage.type === 'deliver') {
+      const d = Math.hypot(pp.x - stage.x, pp.z - stage.z);
+      if (W.player.inCar && d < 11) M.advanceStage();
+      else if (!W.player.inCar && d < 11) W.hintDeliver = true;
+      else W.hintDeliver = false;
+    } else if (stage.type === 'race' || (M.race && M.race.jobRace)) {
+      M.updateRace(dt);
+    } else if (stage.type === 'survive') {
+      M.surviveLeft -= dt;
+      if (M.surviveLeft <= 0) M.advanceStage();
+    }
+    // Stash pickups are always live.
+    for (const s of W.city.stashes) {
+      if (s.taken) continue;
+      if (Math.hypot(pp.x - s.x, pp.z - s.z) < 2.5) {
+        s.taken = true;
+        s.mesh.visible = false;
+        if (s.glow) s.glow.visible = false;
+        W.player.cash += 150;
+        W.audio.coin();
+        W.notify('Hidden stash \u2014 +$150');
       }
     }
-    const near = (x, z, r) => Math.hypot(p.x - x, p.z - z) < r;
-    switch (st.type) {
-      case 'go':
-        if (near(st.x, st.z, 9)) this._advance();
-        break;
-      case 'collect':
-        if (near(st.x, st.z, 6)) { world.audio.coin(); this._advance(); }
-        break;
-      case 'deliver':
-        if (inCar && near(st.x, st.z, 11)) this._advance();
-        else if (!inCar && near(st.x, st.z, 11)) world.hud.hint('You need a car for this drop');
-        break;
-      case 'steal':
-        if (this.targetCar && world.player.inCar === this.targetCar) {
-          world.hud.notify('That’s the one — now move!', 'good');
-          this._advance();
-        }
-        break;
-      case 'race': {
-        const pt = st.points[this.racePoint];
-        if (pt && near(pt[0], pt[1], 13)) {
-          this.racePoint += 1;
-          world.audio.coin();
-          if (this.racePoint >= st.points.length) { this._advance(); }
-          else {
-            const np = st.points[this.racePoint];
-            world.setMarker(np[0], np[1], `Checkpoint ${this.racePoint + 1}/${st.points.length}`);
-            world.hud.notify(`Checkpoint ${this.racePoint}/${st.points.length}`, 'good');
-          }
-        }
-        break;
-      }
-      case 'survive':
-        // Timer handles completion.
-        break;
-      case 'kill':
-        break;
-    }
-  }
+  };
 
-  progressFraction() {
-    const job = this.job();
-    if (!job) return 1;
-    return this.stageIndex / job.stages.length;
-  }
+  M.updateRace = function (dt) {
+    if (!M.race) return;
+    M.race.timeLeft -= dt;
+    const cp = M.race.checkpoints[M.race.idx];
+    if (cp) {
+      const pp = W.playerPos();
+      if (Math.hypot(pp.x - cp.x, pp.z - cp.z) < 13) {
+        cp.done = true;
+        M.race.idx++;
+        W.audio.coin();
+        if (M.race.idx >= M.race.checkpoints.length) {
+          M.finishRace(true);
+          return;
+        }
+        const next = M.race.checkpoints[M.race.idx];
+        W.city.setMarker(next.x, next.z, 'Checkpoint ' + (M.race.idx + 1) + '/' + M.race.checkpoints.length);
+        W.toast('Checkpoint ' + M.race.idx + '/' + M.race.checkpoints.length);
+      }
+    }
+    if (M.race.timeLeft <= 0) M.finishRace(false);
+  };
+
+  // Human-readable objective label for the HUD (with live kill counts).
+  M.objectiveLabel = function () {
+    const stage = M.stage();
+    if (!stage) return '';
+    if (stage.type === 'kill') {
+      return stage.label + ' (' + M.killsDone + '/' + M.killsTotal + ')';
+    }
+    if (stage.type === 'race' && M.race) {
+      return stage.label + ' \u2014 ' + M.race.idx + '/' + M.race.checkpoints.length + ' gates';
+    }
+    return stage.label;
+  };
+
+  M.completion = function () {
+    const jobsPart = 0.8 * (M.completedJobs / 8);
+    const respPart = 0.2 * clamp(W.player.respect / 2600, 0, 1);
+    return Math.round((jobsPart + respPart) * 100);
+  };
+
+  return M;
 }

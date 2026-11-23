@@ -1,103 +1,80 @@
-// A tiny static server for game/ (Node 22, standard library only), so the game can
-// be played locally without a build step: `node serve.ts` serves game/ on
-// http://localhost:8080. It sends the MIME types a browser game needs, refuses any
-// path outside game/, and otherwise does nothing clever: a development convenience.
+// Palmera Bay static server (Node stdlib only).
+// Serves the game/ folder on http://localhost:<port> for local playtesting.
 //   node serve.ts [--port 8080] [--host 127.0.0.1]
-import { createReadStream, statSync } from 'node:fs';
+// Paths that escape game/ are refused with 403; missing files give 404;
+// HEAD is answered with headers only, like GET.
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { createReadStream, statSync } from 'node:fs';
+import { join, resolve, normalize, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./game', import.meta.url)));
-const args = process.argv.slice(2);
+const root = resolve(join(fileURLToPath(new URL('.', import.meta.url)), 'game'));
 
-function flagValue(name: string): string | undefined {
-  const i = args.indexOf(name);
-  if (i !== -1 && args[i + 1] !== undefined) return args[i + 1];
-  const eq = args.find((a) => a.startsWith(name + '='));
-  return eq ? eq.slice(name.length + 1) : undefined;
+const TYPES = new Map([
+  ['.html', 'text/html; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.mjs', 'text/javascript; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.svg', 'image/svg+xml'],
+  ['.ico', 'image/x-icon'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.wasm', 'application/wasm'],
+]);
+
+function pickPort(argv) {
+  const i = argv.indexOf('--port');
+  const n = i === -1 ? 8080 : Number(argv[i + 1]);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : 8080;
 }
 
-if (args.includes('--help') || args.includes('-h')) {
-  console.log('Usage: node serve.ts [--port 8080] [--host 127.0.0.1]\nServes game/ on http://<host>:<port> (default 127.0.0.1:8080).');
-  process.exit(0);
+function pickHost(argv) {
+  const i = argv.indexOf('--host');
+  return i === -1 ? '127.0.0.1' : argv[i + 1] || '127.0.0.1';
 }
 
-const requestedPort = Number(flagValue('--port') ?? 8080);
-const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort < 65536 ? requestedPort : 8080;
-const host = flagValue('--host') ?? '127.0.0.1';
+const port = pickPort(process.argv.slice(2));
+const host = pickHost(process.argv.slice(2));
 
-const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.txt': 'text/plain; charset=utf-8',
-};
-
-const server = createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+const server = createServer((req, res) => {
+  const raw = req.url || '/';
+  let path = '/';
   try {
-    pathname = decodeURIComponent(url.pathname);
+    path = decodeURIComponent(new URL(raw, 'http://x').pathname);
   } catch {
-    response.writeHead(400).end('bad request');
+    res.writeHead(400).end('bad request');
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
+  if (path.endsWith('/')) path += 'index.html';
+  const file = resolve(join(root, normalize(path)));
   if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
+    res.writeHead(403).end('forbidden');
     return;
   }
-  let size: number;
+  let bytes = 0;
   try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
+    const st = statSync(file);
+    if (!st.isFile()) throw new Error('not a file');
+    bytes = st.size;
   } catch {
-    response.writeHead(404).end('not found');
+    res.writeHead(404).end('not found');
     return;
   }
   const headers = {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
+    'content-type': TYPES.get(extname(file).toLowerCase()) || 'application/octet-stream',
+    'content-length': bytes,
     'cache-control': 'no-store',
   };
-  // HEAD answers with headers only — useful for health checks and link probes.
-  if (request.method === 'HEAD') {
-    response.writeHead(200, headers).end();
-    return;
-  }
-  response.writeHead(200, headers);
-  createReadStream(file).pipe(response);
-});
-
-server.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`serve.ts: port ${port} is already in use — stop the other server or pass --port <free port>.`);
-  } else {
-    console.error(`serve.ts: ${err.message}`);
-  }
-  process.exit(1);
+  res.writeHead(200, headers);
+  if (req.method === 'HEAD') { res.end(); return; }
+  createReadStream(file).pipe(res);
 });
 
 server.listen(port, host, () => {
-  console.log(`game/ is on http://${host}:${port}`);
+  console.log(`Palmera Bay: game/ is on http://${host}:${port}`);
 });

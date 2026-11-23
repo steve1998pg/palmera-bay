@@ -1,85 +1,55 @@
-# 🌅 PALMERA BAY
-
 [![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![rank](https://make.fun/badge/gta6-01/steve1998pg/palmera-bay/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/steve1998pg/palmera-bay/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![make.fun bounty](https://img.shields.io/badge/make.fun-GTA%206%20bounty-f59e0b)](https://make.fun/bounty/gta6-01)
-[![license: MIT](https://img.shields.io/badge/license-MIT-14b8a6)](LICENSE)
-[![play offline](https://img.shields.io/badge/play-offline%20in%20Chrome-38bdf8)](https://github.com/steve1998pg/palmera-bay)
 
-**An original open-world crime game in a sun-soaked coastal city — built for the
-[make.fun GTA 6 bounty](https://make.fun/bounty/gta6-01).** No Rockstar assets,
-names, characters or music: the city, the people, the cars, the story and the
-radio are all invented here.
+# PALMERA BAY
 
-Dante Cruz is back in Palmera Bay with $250, a borrowed pistol and a debt to
-Celia “La Jefa” Duarte. Eight jobs stand between him and the whole city — if
-the PBPD doesn’t get him first.
+An open-world crime game in the spirit of GTA 6, running entirely in a desktop browser from its own files. Golden hour over a fictional coastal city. Dante Cruz is back in Palmera Bay with $250, a borrowed pistol, and a debt to Celia "La Jefa" Duarte. Eight story jobs stand between him and the whole bay.
 
-## Play
+## How to play
 
-```sh
+```bash
 node serve.ts
-# open http://localhost:8080
+# then open http://localhost:8080
 ```
 
-Static files only, no network request, no build step. Desktop Chrome, keyboard + mouse.
+No build step, no network (three.js is vendored locally under `game/vendor/`). Keyboard + mouse.
 
-## What’s in the city
+## Features
 
-- **A living open world** — 8 districts (Marina Row, Sundial Square, Old Cannery,
-  Palm Heights, Seaglass Beach, Saltflats Port, Harbor Steps, Calle Verde), a
-  beach boulevard, a pier, traffic that follows the street grid, and pedestrians
-  who flee a gunfight.
-- **On foot and by car** — steal anything with four wheels (E), from taxis to the
-  Meridian GT; arcade handling with drift, handbrake and nitro.
-- **Wanted level 1–5** — PBPD dispatch with named pursuit units, roadblocks,
-  foot cops and the AIR-1 helicopter with its spotlight. Break line of sight and
-  the search zone shrinks until the heat is off.
-- **8 story jobs** with staged objectives, timers, dialogue and payouts, plus a
-  street race, 12 cash stashes and a garage.
-- **Combat** — fists, pistol, SMG, shotgun and long rifle; hitscan gunplay with
-  tracers, muzzle flashes and exploding cars.
-- **Crew abilities** — Nico swaps your plates (Z), Tomas patches your ride (X),
-  Sofia fires a decoy flare (V).
-- **HUD with minimap** — mission card, PBPD dispatch panel, weapon slots, wanted
-  stars, respect ranks, health/armour, speedometer, radio and a full city map (M).
-- **Ibarra Customs** — repair, respray, tune, armour plating, nitro, guns, ammo
-  and body armour, plus a showroom.
-- **Save** — progress autosaves to the browser; continue from the title screen.
-- **Radio** — three procedurally sequenced stations (Palmera FM, Radio Mango,
-  Static Coast). All sound is synthesized live with WebAudio; there are no audio files.
+- **A living city**: 960×960 m of streets, 8 districts, a beach, a pier, a clock tower, palms, billboards, traffic and pedestrians — all built deterministically from a seed (`?seed=7` by default).
+- **8 story jobs**: steal cars, clear Tiburon crews, win a 7-gate street race, survive a 90-second manhunt at wanted level 4, and take Sundial Square back to become Bay Boss.
+- **Driving**: arcade handling with drift handbrake, nitro, tuning, armour plating and resprays at Ibarra Customs.
+- **Wanted system**: heat, 5 stars, pursuing cruisers, foot cops, the AIR-1 helicopter with a spotlight, and roadblocks.
+- **Combat**: 5 weapons (fists, pistol, SMG, shotgun, rifle) with hitscan tracers, reloads and armour.
+- **Crew**: Nico (lose heat), Tomas (repair your car), Sofia (decoy flare that scatters the police).
+- **Side activities**: a $500 street race, 12 hidden stashes worth $150 each.
+- **Radio**: three fully synthesized WebAudio stations — Palmera FM, Radio Mango, Static Coast.
+- **Progression**: respect ranks from NOBODY to BAY BOSS, cash, saves (localStorage), and a completion percentage on the map screen.
 
 ## Controls
 
 | Key | Action |
 | --- | --- |
-| W A S D | Move / drive |
-| Mouse | Look & aim (click canvas to lock) |
-| E | Enter / steal car · exit car |
-| Space | Jump · handbrake in a car |
-| Shift | Sprint · nitro (if fitted) |
+| WASD / arrows | Walk / drive (camera relative) |
+| Mouse | Look & aim (click the game to lock the mouse) |
+| E | Enter / steal a car, exit a car |
+| Space | Jump / handbrake |
+| Shift | Run / nitro |
 | Click / F | Shoot / punch |
-| 1–5, Q, R | Weapons · cycle · reload (R only reloads when the mag is short) |
-| Z X V | Crew: getaway · repair · decoy |
-| M | City map & stats (completion: 80% jobs + 20% respect) |
-| P / Esc | Pause |
-| C | Change radio station |
-| G | Garage, at Ibarra Customs |
+| 1–5 | Weapons · Q cycle · R reload |
+| Z / X / V | Nico / Tomas / Sofia |
+| M | Map & stats · P / Esc pause · C radio · G garage |
 
-## Tech
+## Technology
 
-- `three.js` (vendored `three.module.min.js` under `game/vendor/`) — low-poly
-  golden-hour 3D, instanced buildings, palms and lamps, shadow-mapped sun.
-- Vanilla ES modules, split by job: `city`, `vehicles`, `people`, `player`,
-  `police`, `missions`, `hud`, `audio`, `save`, `shots`, `main`.
-- `?shot=chase|street|garage|map&seed=1` stages deterministic screenshot scenes
-  through the game’s own systems (see `shots.json`). The city layout, stash
-  spots and screenshots are deterministic for a given seed — `city.js` builds
-  its sections in a fixed order so the seeded RNG stream never shifts.
-- `main.ts` hands the game in: it copies `game/` + `screenshots/` to `/output`
-  and writes `dossier.json` with the kit’s `vendor/makefun-game.ts`.
+- three.js r160 (vendored, `game/vendor/three.module.min.js`)
+- Plain ES modules, no build step, Node stdlib only for `serve.ts` / `main.ts`
+- All music and sound effects are synthesized with WebAudio — no audio files
 
-## License
+## Layout
 
-MIT — see [LICENSE](LICENSE).
+- `game/index.html` + `game/css/style.css` — page and HUD
+- `game/src/` — one module per system: `city`, `player`, `police`, `missions`, `people`, `vehicles`, `audio`, `hud`, `input`, `save`, `shots`, `config`, `random`, `main`
+- `main.ts` / `serve.ts` — dossier builder and static server
+- `screenshots/` — the 4 bounty screenshots

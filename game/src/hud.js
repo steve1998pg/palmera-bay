@@ -1,503 +1,538 @@
-// HUD: every DOM panel, the minimap and the full city map, dialogue, menus and
-// the garage shop. The judge reads the game mostly through these screens.
-import { WEAPONS, RANKS, CREW, SHOP_CAR, SHOP_GEAR, VEHICLE_TYPES, rankFor } from './config.js';
-import { giverShortName } from './missions.js';
-import { fmtCash, fmtTime, clockString } from './random.js';
+// HUD: mission card, dispatch, wanted stars, cash, rank, weapons, crew,
+// minimap + big map, dialogue, prompts, notifications, shop, title, pause
+// and game-over screens. Refreshed at 10 Hz; the canvases redraw with it.
+import { WEAPONS, WEAPON_ORDER, RANKS, rankFor, SHOP_UPGRADES, SHOP_GEAR, SHOP_SHOWROOM, RADIO } from './config.js';
+import { fmtCash, fmtTime, clockString, clamp } from './random.js';
 
-const $ = (id) => document.getElementById(id);
-// Completion: 80% from the 8 story jobs, 20% from respect (2600 = BAY BOSS).
-const COMPLETION_JOB_WEIGHT = 80;
-const COMPLETION_RESPECT_WEIGHT = 20;
-const COMPLETION_RESPECT_MAX = 2600;
+function el(id) { return document.getElementById(id); }
 
-export function completionPercent(completedJobs, respect) {
-  const jobs = (completedJobs / 8) * COMPLETION_JOB_WEIGHT;
-  const rep = Math.min(respect, COMPLETION_RESPECT_MAX) / COMPLETION_RESPECT_MAX * COMPLETION_RESPECT_WEIGHT;
-  return Math.min(100, Math.round(jobs + rep));
-}
+export function makeHud(W) {
+  const H = {
+    hudT: 0, dialogT: 0, notifyT: 0, toastT: 0,
+    shopOpen: false,
+  };
 
-export class HUD {
-  constructor(world) {
-    this.world = world;
-    this.el = {};
-    for (const id of ['hud', 'mission-card', 'mission-job', 'mission-name', 'mission-timer', 'mission-objective',
-      'mission-stage-fill', 'mission-next-text', 'dispatch', 'dispatch-units', 'dispatch-list', 'clock', 'radio-now',
-      'cash', 'stars', 'wanted-state', 'rank-badge', 'rank-name', 'respect-fill', 'respect-text', 'weapons', 'crew',
-      'district-name', 'district-sub', 'minimap', 'health-fill', 'health-num', 'armour-fill', 'armour-num',
-      'radio-station', 'radio-song', 'vehicle-name', 'cond-fill', 'cond-num', 'speed-num', 'speed-unit',
-      'dialogue', 'dialogue-portrait', 'dialogue-who', 'dialogue-text', 'crosshair', 'prompt', 'wanted-flash',
-      'notify', 'objective-toast', 'damage-vignette', 'title-screen', 'btn-continue', 'continue-label', 'btn-new',
-      'btn-how', 'howto', 'btn-how-close', 'pause-menu', 'bigmap', 'stat-respect', 'stat-cash', 'stat-jobs',
-      'stat-complete', 'complete-fill', 'map-stats', 'btn-resume', 'btn-save', 'btn-quit', 'shop', 'shop-car-canvas',
-      'shop-car-name', 'shop-cond-fill', 'shop-cond-num', 'mod-tune', 'mod-plating', 'mod-nitro', 'shop-cash-num',
-      'shop-list', 'shop-list2', 'shop-desc', 'btn-shop-close', 'gameover', 'gameover-title', 'gameover-text',
-      'btn-respawn', 'job-done', 'job-done-title', 'job-done-text', 'job-done-reward', 'btn-job-next', 'status']) {
-      this.el[id] = $(id);
+  function setText(id, text) {
+    const n = el(id);
+    if (n && n.textContent !== text) n.textContent = text;
+  }
+
+  function show(id, yes) {
+    const n = el(id);
+    if (n) n.classList.toggle('hidden', !yes);
+  }
+
+  // ---- notifications / toasts / dialogue ----
+  H.notify = function (text) {
+    const n = el('notify');
+    if (!n) return;
+    n.textContent = text;
+    n.classList.remove('hidden');
+    H.notifyT = 5.2;
+  };
+
+  H.toast = function (text) {
+    const n = el('objective-toast');
+    if (!n) return;
+    n.textContent = text;
+    n.classList.remove('hidden');
+    H.toastT = 2.6;
+  };
+
+  H.showDialog = function (who, text, color, initials) {
+    const box = el('dialogue');
+    if (!box) return;
+    setText('dialogue-who', who);
+    setText('dialogue-text', text);
+    const port = el('dialogue-portrait');
+    if (port) {
+      port.textContent = initials || '?';
+      port.style.background = color || '#888';
     }
-    this.minimapCtx = this.el.minimap.getContext('2d');
-    this.bigmapCtx = this.el.bigmap.getContext('2d');
-    this.dialogueTimer = 0;
-    this.lastHintAt = 0;
-    this._buildWeapons();
-    this._buildCrew();
-    this._wireButtons();
-  }
+    box.classList.remove('hidden');
+    H.dialogT = 7;
+  };
 
-  _buildWeapons() {
-    this.el.weapons.innerHTML = '';
-    this.weaponSlots = {};
-    for (const w of WEAPONS) {
-      const d = document.createElement('div');
-      d.className = 'wslot';
-      d.id = 'wslot-' + w.id;
-      d.innerHTML = `<span class="wk">${w.key}</span><span class="wn">${w.name}</span><span class="wa">—</span>`;
-      this.el.weapons.appendChild(d);
-      this.weaponSlots[w.id] = d;
-    }
-  }
-  _buildCrew() {
-    this.el.crew.innerHTML = '';
-    this.crewChips = {};
-    for (const c of CREW) {
-      const d = document.createElement('div');
-      d.className = 'crew-chip';
-      d.innerHTML = `<span class="ck">${c.key.toUpperCase()}</span><div><b>${c.name}</b><span>${c.role}</span></div><span class="cd">READY</span>`;
-      this.el.crew.appendChild(d);
-      this.crewChips[c.id] = d;
-    }
-  }
-  _wireButtons() {
-    const w = this.world;
-    this.el['btn-new'].onclick = () => w.startNewGame();
-    this.el['btn-continue'].onclick = () => w.continueGame();
-    this.el['btn-how'].onclick = () => this.el.howto.classList.remove('hidden');
-    this.el['btn-how-close'].onclick = () => this.el.howto.classList.add('hidden');
-    this.el['btn-resume'].onclick = () => w.setPaused(false);
-    this.el['btn-save'].onclick = () => { w.saveGame(); this.notify('Progress saved.', 'good'); };
-    this.el['btn-quit'].onclick = () => w.quitToTitle();
-    this.el['btn-respawn'].onclick = () => w.respawn();
-    this.el['btn-job-next'].onclick = () => this.el['job-done'].classList.add('hidden');
-    this.el['btn-shop-close'].onclick = () => w.closeShop();
-    this.el.dialogue.onclick = () => this.hideDialogue();
-  }
+  H.hideDialog = function () {
+    show('dialogue', false);
+    H.dialogT = 0;
+  };
 
-  show() { this.el.hud.classList.remove('hidden'); }
-  hide() { this.el.hud.classList.add('hidden'); }
+  H.flashDamage = function () {
+    const v = el('damage-vignette');
+    if (!v) return;
+    v.classList.remove('hidden');
+    v.style.opacity = '0.55';
+    setTimeout(() => { v.style.opacity = '0'; }, 120);
+    setTimeout(() => v.classList.add('hidden'), 500);
+  };
 
-  setMission(job, stageIndex, stage) {
-    this.el['mission-job'].textContent = `JOB ${this.world.missions.jobIndex + 1}/8`;
-    this.el['mission-name'].textContent = job.name + ' · ' + giverShortName(job.giver);
-    this.el['mission-objective'].textContent = stage.label;
-    this.el['mission-next-text'].textContent = stage.next || '—';
-    this.el['mission-stage-fill'].style.width = Math.round((stageIndex / job.stages.length) * 100) + '%';
-    this.el['mission-timer'].textContent = stage.time ? fmtTime(stage.time) : '';
-  }
-  setTimer(sec) { this.el['mission-timer'].textContent = fmtTime(Math.max(0, sec)); }
+  H.flashWanted = function () {
+    const v = el('wanted-flash');
+    if (!v) return;
+    v.classList.remove('hidden');
+    setTimeout(() => v.classList.add('hidden'), 900);
+  };
 
-  showDialogue(giver, text) {
-    this.el['dialogue-portrait'].textContent = giver.initials;
-    this.el['dialogue-portrait'].style.background = giver.color;
-    this.el['dialogue-who'].innerHTML = `${giver.name} <span>${giver.role}</span>`;
-    this.el['dialogue-text'].textContent = text;
-    this.el.dialogue.classList.remove('hidden');
-    this.dialogueTimer = 7;
-  }
-  hideDialogue() { this.el.dialogue.classList.add('hidden'); this.dialogueTimer = 0; }
-
-  notify(text, kind = '') {
-    const d = document.createElement('div');
-    d.className = 'note ' + kind;
-    d.textContent = text;
-    this.el.notify.appendChild(d);
-    setTimeout(() => d.remove(), 5200);
-    while (this.el.notify.children.length > 3) this.el.notify.firstChild.remove();
-  }
-  hint(text) {
-    const now = performance.now();
-    if (now - this.lastHintAt < 2500) return;
-    this.lastHintAt = now;
-    this.notify(text, 'gold');
-  }
-  flashWanted(stars) {
-    const f = this.el['wanted-flash'];
-    f.textContent = stars >= 4 ? 'WANTED ★★★★' : 'WANTED';
-    f.classList.remove('hidden');
-    setTimeout(() => f.classList.add('hidden'), 1400);
-  }
-  objectiveToast(line1, line2) {
-    const t = this.el['objective-toast'];
-    t.innerHTML = `<div class="ot1">${line1}</div><div class="ot2">${line2}</div>`;
-    t.classList.remove('hidden');
-    setTimeout(() => t.classList.add('hidden'), 2600);
-  }
-  damageFlash() {
-    const v = this.el['damage-vignette'];
-    v.style.boxShadow = 'inset 0 0 120px 40px rgba(220,38,38,.55)';
-    setTimeout(() => { v.style.boxShadow = 'inset 0 0 120px 40px rgba(220,38,38,0)'; }, 180);
-  }
-  setPrompt(html) {
-    if (html) { this.el.prompt.innerHTML = html; this.el.prompt.classList.remove('hidden'); }
-    else this.el.prompt.classList.add('hidden');
-  }
-
-  showJobDone(job) {
-    this.el['job-done-title'].textContent = job.name + ' — COMPLETE';
-    this.el['job-done-text'].textContent = job.brief;
-    this.el['job-done-reward'].textContent = `+${fmtCash(job.reward)}  ·  +${job.respect} RESPECT`;
-    this.el['job-done'].classList.remove('hidden');
-  }
-  showGameOver(title, text) {
-    this.el['gameover-title'].textContent = title;
-    this.el['gameover-text'].textContent = text;
-    this.el.gameover.classList.remove('hidden');
-  }
-  hideGameOver() { this.el.gameover.classList.add('hidden'); }
-
-  showTitle(hasSave, label) {
-    this.el['title-screen'].classList.remove('hidden');
-    if (hasSave) {
-      this.el['btn-continue'].classList.remove('hidden');
-      this.el['continue-label'].textContent = label;
-    } else this.el['btn-continue'].classList.add('hidden');
-  }
-  hideTitle() { this.el['title-screen'].classList.add('hidden'); }
-
-  // ---- per-frame HUD refresh (cheap text writes, throttled by caller) ----
-  update(world, dt) {
-    const p = world.player;
-    const police = world.police;
-    this.el.cash.textContent = fmtCash(p.cash);
-    // Stars.
-    let starsHtml = '';
-    for (let i = 1; i <= 5; i++) starsHtml += `<span class="${i <= police.wanted ? '' : 'off'}">★</span>`;
-    this.el.stars.innerHTML = starsHtml;
-    this.el['wanted-state'].textContent =
-      police.wanted === 0 ? '' : police.state === 'search' ? 'SEARCHING — stay out of sight' : police.wanted >= 3 && police.heli ? 'IN SIGHT — Air One has you in the light' : 'IN SIGHT';
-    // Rank / respect.
-    const { rank, index, next } = rankFor(p.respect);
-    this.el['rank-badge'].textContent = 'RANK ' + (index + 1);
-    this.el['rank-name'].textContent = rank.name;
-    const span = next ? next.need - rank.need : 1;
-    this.el['respect-fill'].style.width = Math.round(((p.respect - rank.need) / span) * 100) + '%';
-    this.el['respect-text'].textContent = next
-      ? `${p.respect - rank.need} / ${span} RESPECT`
-      : `${p.respect} RESPECT · MAX RANK`;
-    // Vitals.
-    this.el['health-fill'].style.width = p.hp + '%';
-    this.el['health-num'].textContent = Math.ceil(p.hp);
-    this.el['armour-fill'].style.width = p.armour + '%';
-    this.el['armour-num'].textContent = Math.ceil(p.armour);
-    // Clock + radio.
-    this.el.clock.textContent = clockString(world.clockMinutes);
-    const st = world.audio.currentStation();
-    this.el['radio-now'].textContent = `♪ ${st.name} — ${st.song}`;
-    this.el['radio-station'].textContent = st.name;
-    this.el['radio-song'].textContent = st.song;
-    // Weapons.
-    for (const w of WEAPONS) {
-      const slot = this.weaponSlots[w.id];
-      const owned = p.weapons[w.id].owned;
-      slot.classList.toggle('active', p.weaponId === w.id);
-      slot.classList.toggle('locked', !owned);
-      const wa = slot.querySelector('.wa');
-      wa.textContent = !owned ? 'LOCKED' : w.id === 'fists' ? '∞' : `${p.weapons[w.id].mag} / ${p.weapons[w.id].reserve === Infinity ? '∞' : p.weapons[w.id].reserve}`;
-    }
-    // Crew.
-    for (const c of CREW) {
-      const chip = this.crewChips[c.id];
-      const cd = p.crewCd[c.id];
-      chip.classList.toggle('ready', cd <= 0);
-      chip.classList.toggle('cooling', cd > 0);
-      chip.querySelector('.cd').textContent = cd <= 0 ? 'READY' : Math.ceil(cd) + 's';
-    }
-    // Vehicle / speed.
-    const car = p.inCar;
-    if (car) {
-      this.el['vehicle-name'].textContent = car.spec.name + (car.nitro && car.nitroFuel > 0 ? ' · N2O' : '');
-      this.el['cond-fill'].style.width = car.cond + '%';
-      this.el['cond-fill'].style.background = car.cond > 50 ? '#4ade80' : car.cond > 25 ? '#fbbf24' : '#ef4444';
-      this.el['cond-num'].textContent = Math.ceil(car.cond) + '%';
-      this.el['speed-num'].textContent = Math.round(Math.abs(car.speed) * 3.6);
-      this.el['speed-unit'].textContent = 'KM/H';
-    } else {
-      this.el['vehicle-name'].textContent = 'ON FOOT';
-      this.el['cond-fill'].style.width = '0%';
-      this.el['cond-num'].textContent = '—';
-      this.el['speed-num'].textContent = Math.round(p.speed * 3.6);
-      this.el['speed-unit'].textContent = 'KM/H';
-    }
-    // District.
-    const d = world.city.districtAt(p.x, p.z);
-    this.el['district-name'].textContent = d.name;
-    this.el['district-sub'].textContent = d.sub + ' · ' + d.blurb;
-    // Dispatch panel.
-    if (police.wanted > 0) {
-      this.el.dispatch.classList.remove('hidden');
-      this.el['dispatch-units'].textContent = `${police.units.length + police.footCops.filter((c) => !c.dead).length + (police.heli ? 1 : 0)} UNITS · ${police.wanted}★`;
-      const rows = police.dispatchRows(world);
-      this.el['dispatch-list'].innerHTML = rows.map((r) =>
-        `<div class="drow"><span class="dn">${r.name}</span><span class="dd">${r.dist}</span><span class="ds ${r.cls}">${r.role}</span></div>`).join('')
-        + (rows.length === 0 ? '<div class="drow"><span class="dn">—</span><span class="dd"></span><span class="ds grey">EN ROUTE</span></div>' : '');
-    } else {
-      this.el.dispatch.classList.add('hidden');
-    }
-    // Crosshair: only on foot with a gun and mouse locked / held.
-    this.el.crosshair.classList.toggle('hidden', !!car || p.weaponId === 'fists');
-    if (this.dialogueTimer > 0) {
-      this.dialogueTimer -= dt;
-      if (this.dialogueTimer <= 0) this.hideDialogue();
-    }
-    this.drawMinimap(world);
-  }
-
-  // ---- shared map base: sea, sand, blocks, roads. Both maps draw on top of it.
-  // X/Y map world coords onto a square canvas of size S.
-  _mapBase(ctx, world, S, blockColor = '#3f5a6b') {
-    const half = 480, k = S / (half * 2);
-    const X = (x) => (x + half) * k, Y = (z) => (z + half) * k;
+  // ---- minimap + big map ----
+  function drawMapCanvas(cv, big) {
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    const S = cv.width;
+    const toMap = (x, z) => [((x + 480) / 960) * S, ((z + 480) / 960) * S];
     ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#14324a'; ctx.fillRect(0, 0, S, S);
-    // Ocean + sand.
-    ctx.fillStyle = '#2a7f8f'; ctx.fillRect(X(452), 0, S - X(452), S);
-    ctx.fillStyle = '#e8c98f'; ctx.fillRect(X(384), 0, X(452) - X(384), S);
-    // Blocks.
-    ctx.fillStyle = blockColor;
-    for (const c of world.city.colliders) {
-      ctx.fillRect(X(c.x - c.hx), Y(c.z - c.hz), (c.hx * 2) * k, (c.hz * 2) * k);
-    }
+    ctx.fillStyle = '#20242e';
+    ctx.fillRect(0, 0, S, S);
+    // Beach + sea.
+    ctx.fillStyle = '#c9b078';
+    ctx.fillRect(((384 + 480) / 960) * S, 0, S - ((384 + 480) / 960) * S, S);
+    ctx.fillStyle = '#2b6f8e';
+    ctx.fillRect(((452 + 480) / 960) * S, 0, S - ((452 + 480) / 960) * S, S);
     // Roads.
-    ctx.strokeStyle = '#8b9bb4'; ctx.lineWidth = 2;
-    for (const s of world.city.streets) {
-      ctx.beginPath(); ctx.moveTo(X(s), 0); ctx.lineTo(X(s), S); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, Y(s)); ctx.lineTo(S, Y(s)); ctx.stroke();
+    ctx.strokeStyle = '#565b66';
+    ctx.lineWidth = big ? 5 : 3;
+    for (const s of W.city.streets) {
+      const [x1, y1] = toMap(-480, s);
+      const [x2, y2] = toMap(480, s);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      const [x3, y3] = toMap(s, -480);
+      const [x4, y4] = toMap(s, 480);
+      ctx.beginPath(); ctx.moveTo(x3, y3); ctx.lineTo(x4, y4); ctx.stroke();
     }
-    ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(X(352), 0); ctx.lineTo(X(352), S); ctx.stroke();
-    return { X, Y, k };
-  }
-
-  // ---- minimap ----
-  drawMinimap(world) {
-    const ctx = this.minimapCtx;
-    const S = 220;
-    const { X, Y } = this._mapBase(ctx, world, S);
-    // Landmarks.
-    const dot = (x, z, color, r = 4) => {
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(X(x), Y(z), r, 0, Math.PI * 2); ctx.fill();
-    };
-    const L = world.city.locations;
-    dot(L.garage.x, L.garage.z, '#f59e0b', 5);
-    dot(L.safehouse.x, L.safehouse.z, '#4ade80', 5);
-    dot(L.raceStart.x, L.raceStart.z, '#fb7185', 5);
-    dot(L.precinct.x, L.precinct.z, '#a78bfa', 5);
-    for (const s of L.stashes) if (!s.taken) dot(s.x, s.z, '#fde68a', 2.5);
+    ctx.strokeStyle = '#8a6a2a';
+    ctx.lineWidth = big ? 4 : 2;
+    const [bx1, by1] = toMap(352, -480);
+    const [bx2, by2] = toMap(352, 480);
+    ctx.beginPath(); ctx.moveTo(bx1, by1); ctx.lineTo(bx2, by2); ctx.stroke();
+    // Stashes.
+    ctx.fillStyle = '#ffd23f';
+    ctx.font = 'bold ' + (big ? 13 : 9) + 'px system-ui';
+    ctx.textAlign = 'center';
+    for (const st of W.city.stashes) {
+      if (st.taken) continue;
+      const [x, y] = toMap(st.x, st.z);
+      ctx.fillText('$', x, y + 3);
+    }
+    // Key letters on the big map.
+    if (big) {
+      const marks = [
+        ['H', W.city.locations.safehouse], ['G', W.city.locations.garage],
+        ['R', W.city.locations.raceStart], ['P', W.city.locations.precinct],
+      ];
+      ctx.font = 'bold 15px system-ui';
+      for (const [ch, loc] of marks) {
+        const [x, y] = toMap(loc.x, loc.z);
+        ctx.fillStyle = '#111';
+        ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffd23f';
+        ctx.fillText(ch, x, y + 5);
+      }
+      const job = W.missions.job();
+      if (job) {
+        const [x, y] = toMap(W.city.locations.pier.x, W.city.locations.pier.z);
+        ctx.fillStyle = '#ff5a5a';
+        ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(String(W.missions.jobIndex + 1), x, y + 5);
+      }
+    }
     // Mission marker.
-    if (world.marker) {
-      const mx = X(world.marker.x), my = Y(world.marker.z);
-      ctx.fillStyle = '#fbbf24';
-      ctx.beginPath();
-      ctx.moveTo(mx, my - 8); ctx.lineTo(mx + 6, my); ctx.lineTo(mx, my + 8); ctx.lineTo(mx - 6, my);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(mx, my, 11, 0, Math.PI * 2); ctx.stroke();
+    if (W.city.marker) {
+      const [x, y] = toMap(W.city.marker.position.x, W.city.marker.position.z);
+      ctx.fillStyle = '#ffd23f';
+      ctx.beginPath(); ctx.arc(x, y, big ? 8 : 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
-    // Police.
-    for (const u of world.police.units) dot(u.x, u.z, '#ef4444', 3.5);
-    for (const c of world.police.footCops) if (!c.dead) dot(c.x, c.z, '#f87171', 2.5);
-    if (world.police.heli) dot(world.police.heli.x, world.police.heli.z, '#f97316', 4);
+    // Police units.
+    ctx.fillStyle = '#4aa8ff';
+    for (const u of W.police.units) {
+      if (u.dead) continue;
+      const [x, y] = toMap(u.x, u.z);
+      ctx.beginPath(); ctx.arc(x, y, big ? 4 : 3, 0, Math.PI * 2); ctx.fill();
+    }
+    if (W.police.heli) {
+      const [x, y] = toMap(W.police.heli.x, W.police.heli.z);
+      ctx.fillStyle = '#9fd8ff';
+      ctx.beginPath(); ctx.arc(x, y, big ? 6 : 4, 0, Math.PI * 2); ctx.fill();
+    }
     // Player arrow.
-    const p = world.playerPos();
+    const pp = W.playerPos();
+    const [px, py] = toMap(pp.x, pp.z);
+    const heading = W.player.inCar ? W.player.inCar.heading : W.player.heading;
     ctx.save();
-    ctx.translate(X(p.x), Y(p.z));
-    ctx.rotate(Math.PI - world.player.heading);
+    ctx.translate(px, py);
+    // Arrow drawn pointing up; canvas Y grows with world Z, so the
+    // rotation that maps heading h to canvas space is (PI - h).
+    ctx.rotate(Math.PI - heading);
     ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(5.5, 6); ctx.lineTo(0, 3); ctx.lineTo(-5.5, 6); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -8); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
+    ctx.fill();
     ctx.restore();
-    // North.
-    ctx.fillStyle = '#fff'; ctx.font = '900 13px Arial'; ctx.fillText('N', 8, 16);
   }
 
-  // ---- full map (pause screen) ----
-  drawBigMap(world) {
-    const ctx = this.bigmapCtx;
-    const S = 640;
-    const { X, Y } = this._mapBase(ctx, world, S, '#41617a');
-    // Roads read heavier on the big map.
-    ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 3;
-    for (const s of world.city.streets) {
-      ctx.beginPath(); ctx.moveTo(X(s), 0); ctx.lineTo(X(s), S); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, Y(s)); ctx.lineTo(S, Y(s)); ctx.stroke();
-    }
-    ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(X(352), 0); ctx.lineTo(X(352), S); ctx.stroke();
-    // Street names.
-    ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.font = '700 11px Arial';
-    ctx.fillText('PALMERA BLVD', X(356), 20);
-    ctx.fillText('SUNDIAL AVE', 12, Y(-96) - 4);
-    ctx.fillText('SEAGLASS PARADE', X(330), Y(430));
-    // District labels.
-    ctx.font = '900 17px Arial'; ctx.textAlign = 'center';
-    for (const d of world.city.districts || []) {
-      ctx.fillStyle = 'rgba(0,0,0,.55)';
-      ctx.fillRect(X(d.x) - 62, Y(d.z) - 12, 124, 22);
-      ctx.fillStyle = '#fde68a';
-      ctx.fillText(d.name.toUpperCase(), X(d.x), Y(d.z) + 4);
-    }
-    ctx.textAlign = 'left';
-    const L = world.city.locations;
-    const mark = (x, z, letter, color) => {
-      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(X(x), Y(z), 11, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#0f172a'; ctx.font = '900 13px Arial'; ctx.textAlign = 'center';
-      ctx.fillText(letter, X(x), Y(z) + 4.5); ctx.textAlign = 'left';
-    };
-    mark(L.safehouse.x, L.safehouse.z, 'H', '#4ade80');
-    mark(L.garage.x, L.garage.z, 'G', '#f59e0b');
-    mark(L.raceStart.x, L.raceStart.z, 'R', '#fb7185');
-    mark(L.precinct.x, L.precinct.z, 'P', '#a78bfa');
-    for (const s of L.stashes) if (!s.taken) mark(s.x, s.z, '$', '#fde68a');
-    if (world.marker) {
-      ctx.fillStyle = '#fbbf24';
-      ctx.beginPath();
-      const mx = X(world.marker.x), my = Y(world.marker.z);
-      ctx.moveTo(mx, my - 14); ctx.lineTo(mx + 11, my); ctx.lineTo(mx, my + 14); ctx.lineTo(mx - 11, my);
-      ctx.closePath(); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(mx, my, 18, 0, Math.PI * 2); ctx.stroke();
-    }
-    // Player.
-    const p = world.playerPos();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(X(p.x), Y(p.z), 8, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke();
-    // Stats side.
-    const pl = world.player;
-    const { rank, index } = rankFor(pl.respect);
-    this.el['stat-respect'].textContent = `LV ${index + 1} · ${rank.name}`;
-    this.el['stat-cash'].textContent = fmtCash(pl.cash);
-    this.el['stat-jobs'].textContent = `${world.missions.completedJobs} / 8`;
-    const complete = completionPercent(world.missions.completedJobs, pl.respect);
-    this.el['stat-complete'].textContent = complete + '%';
-    this.el['complete-fill'].style.width = complete + '%';
-    const s = pl.stats;
-    this.el['map-stats'].textContent =
-      `CARS STOLEN ${s.carsStolen} · STARS LOST ${s.starsLost} · KNOCKOUTS ${s.knockouts} · RACE WINS ${s.raceWins} · DRIVEN ${s.drivenKm.toFixed(1)} KM`;
-  }
+  H.drawMinimap = function () { drawMapCanvas(el('minimap'), false); };
+  H.drawBigMap = function () { drawMapCanvas(el('bigmap'), true); };
 
-  showPause(world) {
-    this.drawBigMap(world);
-    this.el['pause-menu'].classList.remove('hidden');
-  }
-  hidePause() { this.el['pause-menu'].classList.add('hidden'); }
+  // ---- the 10 Hz HUD refresh ----
+  H.update = function (dt) {
+    H.hudT -= dt;
+    if (H.dialogT > 0) {
+      H.dialogT -= dt;
+      if (H.dialogT <= 0) H.hideDialog();
+    }
+    if (H.notifyT > 0) {
+      H.notifyT -= dt;
+      if (H.notifyT <= 0) show('notify', false);
+    }
+    if (H.toastT > 0) {
+      H.toastT -= dt;
+      if (H.toastT <= 0) show('objective-toast', false);
+    }
+    if (H.hudT > 0) return;
+    H.hudT = 0.1;
+    const p = W.player;
+    const playing = W.state === 'playing' || W.state === 'shop';
+    show('hud', W.state !== 'title');
 
-  // ---- garage shop ----
-  openShop(world, car) {
-    this.shopWorld = world;
-    this.shopCar = car;
-    this.shopTab = 'workshop';
-    this.el.shop.classList.remove('hidden');
-    this.renderShop();
-    this._drawShopCar(car);
-  }
-  closeShop() { this.el.shop.classList.add('hidden'); }
-  renderShop() {
-    const w = this.world, p = w.player, car = this.shopCar;
-    this.el['shop-cash-num'].textContent = fmtCash(p.cash);
-    this.el['shop-car-name'].textContent = car ? car.spec.name : 'NO CAR';
-    const cond = car ? Math.ceil(car.cond) : 0;
-    this.el['shop-cond-fill'].style.width = cond + '%';
-    this.el['shop-cond-num'].textContent = cond + '%';
-    this.el['mod-tune'].classList.toggle('on', !!(car && car.tuned));
-    this.el['mod-plating'].classList.toggle('on', !!(car && car.plated));
-    this.el['mod-nitro'].classList.toggle('on', !!(car && car.nitro));
-    const tabs = this.el.shop.querySelectorAll('.shop-tabs span');
-    tabs[0].classList.toggle('active', this.shopTab === 'workshop');
-    tabs[1].classList.toggle('active', this.shopTab === 'showroom');
-    tabs[0].onclick = () => { this.shopTab = 'workshop'; this.renderShop(); };
-    tabs[1].onclick = () => { this.shopTab = 'showroom'; this.renderShop(); };
-    const list = this.el['shop-list'];
-    const list2 = this.el['shop-list2'];
-    list.innerHTML = ''; list2.innerHTML = '';
-    const row = (item, state, locked, onBuy, tagCls = '') => {
-      const d = document.createElement('div');
-      d.className = 'shop-item' + (locked ? ' disabled' : '');
-      d.innerHTML = `<span class="si-tag ${tagCls}">${item.tag}</span><span class="si-name">${item.name}</span>` +
-        (state ? `<span class="si-state ${locked ? 'locked' : ''}">${state}</span>` : '') +
-        `<span class="si-price">${fmtCash(item.price)}</span>`;
-      if (!locked) d.onclick = () => { onBuy(item); this.el['shop-desc'].textContent = item.desc; };
-      else d.onclick = () => { this.el['shop-desc'].textContent = item.desc; };
-      return d;
-    };
-    if (this.shopTab === 'workshop') {
-      for (const item of SHOP_CAR) {
-        let state = '', locked = !car;
-        if (car) {
-          if (item.id === 'tune') { state = car.tuned ? '✓ OWNED' : ''; locked = car.tuned; }
-          if (item.id === 'plating') { state = car.plated ? '✓ OWNED' : ''; locked = car.plated; }
-          if (item.id === 'nitro') { state = car.nitro ? '✓ OWNED' : ''; locked = car.nitro || p.respect < 600; if (p.respect < 600 && !car.nitro) state = 'LOCKED · LV 3'; }
-          if (item.id === 'repair') { state = car.cond >= 99 ? '✓ FULL' : ''; locked = car.cond >= 99; }
-          if (item.id === 'respray') { state = ''; }
-        }
-        if (item.id === 'nitro') list.appendChild(row(item, state, locked, () => w.buyUpgrade(item.id), 'red'));
-        else if (item.id === 'tune') list.appendChild(row(item, state, locked, () => w.buyUpgrade(item.id), 'gold'));
-        else list.appendChild(row(item, state, locked, () => w.buyUpgrade(item.id), item.id === 'repair' ? 'teal' : ''));
+    // Mission card.
+    const job = W.missions.job();
+    const stage = W.missions.stage();
+    if (job && stage && W.missions.active) {
+      setText('mission-job', 'JOB ' + (W.missions.jobIndex + 1) + '/8 \u2014 ' + job.name);
+      setText('mission-name', job.name);
+      setText('mission-objective', W.missions.objectiveLabel());
+      setText('mission-stage', 'STAGE ' + (W.missions.stageIndex + 1) + '/' + job.stages.length + ' \u00b7 ' + stage.type.toUpperCase());
+      const next = JOBS_NEXT_NAME(W);
+      setText('mission-next-text', next);
+      show('mission-next', !!next);
+      if (stage.type === 'race' && W.missions.race) {
+        setText('mission-timer', fmtTime(W.missions.race.timeLeft));
+        show('mission-timer', true);
+      } else if (stage.type === 'survive') {
+        setText('mission-timer', fmtTime(W.missions.surviveLeft));
+        show('mission-timer', true);
+      } else {
+        show('mission-timer', false);
       }
-      for (const item of SHOP_GEAR) {
-        let state = '', locked = false;
-        if (item.id === 'smg' || item.id === 'shotgun' || item.id === 'rifle') {
-          const wid = item.id;
-          const owned = p.weapons[wid].owned;
-          state = owned ? '✓ OWNED' : '';
-          locked = owned || p.cash < item.price;
-          if (!owned) {
-            const wdef = WEAPONS.find((x) => x.id === wid);
-            if (p.respect < (RANKS[wdef.rank] ? RANKS[wdef.rank].need : 0)) { state = 'LOCKED · LV ' + (wdef.rank + 1); locked = true; }
-          }
-        }
-        list2.appendChild(row(item, state, locked, () => w.buyGear(item.id)));
-      }
+      const fill = el('mission-stage-fill');
+      if (fill) fill.style.width = Math.round(((W.missions.stageIndex) / job.stages.length) * 100) + '%';
+    } else if (W.missions.completedJobs >= 8) {
+      setText('mission-job', 'PALMERA BAY IS YOURS');
+      setText('mission-objective', 'You run the bay now, Dante.');
+      setText('mission-stage', 'BAY BOSS');
     } else {
-      const showroom = VEHICLE_TYPES.filter((v) => v.price > 0);
-      for (const v of showroom) {
-        list.appendChild(row(
-          { tag: 'CAR', name: v.name, price: v.price, desc: `Top speed ${Math.round(v.top * 3.6)} km/h. Yours the moment you pay — parked outside.` },
-          '', p.cash < v.price, () => w.buyShowroomCar(v.id),
-        ));
-      }
-      list2.innerHTML = '<div style="padding:10px;color:#94a3b8;font-size:13px">Showroom cars spawn outside Ibarra Customs, fuelled and ready. Your old ride stays where you left it.</div>';
+      setText('mission-job', 'FREE ROAM');
+      setText('mission-objective', 'Explore Palmera Bay. Find stashes, steal cars, dodge the law.');
+      setText('mission-stage', 'NO ACTIVE JOB');
+      show('mission-next', false);
+      show('mission-timer', false);
     }
-    this.el['shop-desc'].textContent = car
-      ? 'Tomas: “You break it, I bill it. Cash up front, no tabs.”'
-      : 'No car in the bay. Buy one from the SHOWROOM tab and it’ll be parked outside.';
+
+    // Dispatch panel.
+    const units = W.police.units.filter((u) => !u.dead).slice(0, 6);
+    setText('dispatch-head', 'DISPATCH \u2014 ' + W.police.state.toUpperCase());
+    const dl = el('dispatch-list');
+    if (dl) {
+      dl.innerHTML = units.map((u) => {
+        const pp = W.playerPos();
+        const d = Math.round(Math.hypot(u.x - pp.x, u.z - pp.z));
+        return '<div class="dispatch-row"><span>' + (u.unitName || 'UNIT') + '</span><span>' + d + 'm</span><span>' + (u.unitRole || 'PURSUE') + '</span></div>';
+      }).join('');
+    }
+    setText('dispatch-foot', W.police.heli ? 'AIR-1 overhead' : W.police.footCops.filter((c) => !c.dead).length + ' officers on foot');
+    show('dispatch', W.police.wanted > 0);
+
+    // Clock + radio.
+    setText('clock', clockString(W.clockMinutes));
+    const st = RADIO[W.audio.station];
+    setText('radio-now', st.name + ' ' + st.freq);
+    setText('radio-station', st.name + ' ' + st.freq);
+    setText('radio-song', '\u266a ' + st.song);
+
+    // Cash, wanted, rank.
+    setText('cash', fmtCash(p.cash));
+    const starsEl = el('stars');
+    if (starsEl) {
+      starsEl.textContent = '\u2605'.repeat(W.police.wanted) + '\u2606'.repeat(5 - W.police.wanted);
+      starsEl.classList.toggle('hot', W.police.wanted > 0);
+    }
+    setText('wanted-state', W.police.wanted === 0 ? 'CLEAN' : 'WANTED \u2014 ' + W.police.state.toUpperCase());
+    const rank = rankFor(p.respect);
+    const nextRank = RANKS.find((r) => r.min > p.respect);
+    setText('rank-name', rank.name);
+    setText('rank-badge', rank.name);
+    setText('rank-line', rank.name + ' \u00b7 ' + Math.round(p.respect) + ' respect');
+    setText('respect-text', Math.round(p.respect) + ' / ' + (nextRank ? nextRank.min : 2600));
+    const rf = el('respect-fill');
+    if (rf) rf.style.width = clamp((p.respect / (nextRank ? nextRank.min : 2600)) * 100, 0, 100) + '%';
+    const rb = el('respect-bar');
+    if (rb) rb.title = 'Respect ' + Math.round(p.respect);
+
+    // Weapons.
+    const wEl = el('weapons');
+    if (wEl) {
+      wEl.innerHTML = WEAPON_ORDER.map((id) => {
+        const wdef = WEAPONS[id];
+        const w = p.weapons[id];
+        if (!w.owned) return '';
+        const mag = w.mag === Infinity ? '\u221e' : w.mag + '/' + (w.reserve === Infinity ? '\u221e' : w.reserve);
+        return '<div class="wslot' + (p.weaponId === id ? ' active' : '') + '"><b>' + wdef.key + '</b> ' + wdef.name + ' <span>' + mag + '</span></div>';
+      }).join('');
+    }
+
+    // Crew chips.
+    const cEl = el('crew');
+    if (cEl) {
+      cEl.innerHTML = ['nico', 'tomas', 'sofia'].map((id) => {
+        const cd = Math.ceil(p.crewCd[id]);
+        const label = id === 'nico' ? 'NICO [Z]' : id === 'tomas' ? 'TOMAS [X]' : 'SOFIA [V]';
+        return '<div class="crew-chip' + (cd > 0 ? ' cooling' : '') + '">' + label + (cd > 0 ? ' \u00b7 ' + cd + 's' : '') + '</div>';
+      }).join('');
+    }
+
+    // District + vitals.
+    const pp = W.playerPos();
+    const d = W.city.districtAt(pp.x, pp.z);
+    setText('district-name', d.name);
+    setText('district-sub', d.sub + ' \u00b7 ' + d.blurb);
+    const hf = el('health-fill');
+    if (hf) hf.style.width = clamp(p.hp, 0, 100) + '%';
+    setText('health-num', Math.round(p.hp));
+    const af = el('armour-fill');
+    if (af) af.style.width = clamp(p.armour, 0, 100) + '%';
+    setText('armour-num', Math.round(p.armour));
+
+    // Vehicle card.
+    const car = p.inCar;
+    show('vehicle-card', !!car);
+    if (car) {
+      setText('vehicle-name', car.spec.name);
+      setText('cond-num', Math.round(car.cond));
+      const cf = el('cond-fill');
+      if (cf) cf.style.width = clamp(car.cond, 0, 100) + '%';
+      setText('speed-num', String(Math.round(Math.abs(car.speed) * 3.6)));
+      setText('speed-unit', 'km/h');
+    }
+
+    // Crosshair: on foot with a firearm only.
+    const cross = el('crosshair');
+    if (cross) {
+      const showCross = !car && p.weaponId !== 'fists' && playing;
+      cross.classList.toggle('hidden', !showCross);
+    }
+
+    // Context prompt.
+    H.updatePrompt();
+
+    // Minimap.
+    if (playing) H.drawMinimap();
+  };
+
+  H.updatePrompt = function () {
+    const p = W.player;
+    const prompt = el('prompt');
+    if (!prompt) return;
+    if (W.state !== 'playing') { prompt.classList.add('hidden'); return; }
+    const pp = W.playerPos();
+    let text = '';
+    if (!p.inCar) {
+      const car = p.nearestCar(4);
+      if (car) text = 'E STEAL ' + car.spec.name;
+      else if (Math.hypot(pp.x - W.city.locations.garage.x, pp.z - W.city.locations.garage.z) < 16) text = 'G IBARRA CUSTOMS \u2014 GARAGE & GUNS';
+      else if (Math.hypot(pp.x - W.city.locations.raceStart.x, pp.z - W.city.locations.raceStart.z) < 14) text = 'E STREET RACE \u2014 $500 ENTRY \u00b7 WIN $1,200';
+      else if (Math.hypot(pp.x - W.city.locations.safehouse.x, pp.z - W.city.locations.safehouse.z) < 12) text = 'SAFEHOUSE \u2014 PROGRESS SAVED';
+      else if (W.hintDeliver) text = 'You need a car for this drop';
+    } else {
+      if (Math.hypot(pp.x - W.city.locations.raceStart.x, pp.z - W.city.locations.raceStart.z) < 14) text = 'E STREET RACE \u2014 $500 ENTRY \u00b7 WIN $1,200';
+      else if (Math.hypot(pp.x - W.city.locations.garage.x, pp.z - W.city.locations.garage.z) < 16) text = 'G IBARRA CUSTOMS \u2014 GARAGE & GUNS';
+    }
+    if (text) { prompt.textContent = text; prompt.classList.remove('hidden'); }
+    else prompt.classList.add('hidden');
+  };
+
+  function JOBS_NEXT_NAME(W2) {
+    const idx = W2.missions.jobIndex + 1;
+    if (idx >= 8) return '';
+    const jobs = ['FIRST WHEELS', 'REPO RODEO', 'MARKET SQUEEZE', 'DOCKSIDE AMBUSH', 'HIGH TIDE', 'GOLDEN HOUR', 'THE LONG WAY HOME', 'BAY BOSS'];
+    return 'NEXT: ' + jobs[idx];
   }
-  _drawShopCar(car) {
-    const cv = this.el['shop-car-canvas'];
-    const g = cv.getContext('2d');
-    g.clearRect(0, 0, cv.width, cv.height);
-    // Floor ring.
-    g.fillStyle = '#1e1b2e'; g.fillRect(0, 0, cv.width, cv.height);
-    g.strokeStyle = '#f59e0b'; g.lineWidth = 6;
-    g.beginPath(); g.ellipse(210, 210, 170, 46, 0, 0, Math.PI * 2); g.stroke();
-    g.strokeStyle = 'rgba(245,158,11,.4)'; g.lineWidth = 2;
-    g.beginPath(); g.ellipse(210, 210, 130, 34, 0, 0, Math.PI * 2); g.stroke();
-    if (!car) { g.fillStyle = '#94a3b8'; g.font = '700 18px Arial'; g.textAlign = 'center'; g.fillText('NO CAR IN THE BAY', 210, 150); return; }
+
+  // ---- job done / game over overlays ----
+  H.showJobDone = function (job) {
+    setText('job-done-title', 'JOB COMPLETE');
+    setText('job-done-text', job.name + ' \u2014 well done, Dante.');
+    setText('job-done-reward', '+' + fmtCash(job.reward) + ' \u00b7 +' + job.respect + ' respect');
+    show('job-done', true);
+  };
+
+  H.hideJobDone = function () { show('job-done', false); };
+
+  H.showGameOver = function (kind, text) {
+    setText('gameover-title', kind);
+    setText('gameover-text', text);
+    show('gameover', true);
+  };
+
+  H.hideGameOver = function () { show('gameover', false); };
+
+  // ---- pause / map screen ----
+  H.openPause = function () {
+    const p = W.player;
+    setText('stat-respect', String(Math.round(p.respect)));
+    setText('stat-cash', fmtCash(p.cash));
+    setText('stat-jobs', W.missions.completedJobs + '/8');
+    setText('stat-complete', W.missions.completion() + '%');
+    const cf = el('complete-fill');
+    if (cf) cf.style.width = W.missions.completion() + '%';
+    const cb = el('complete-bar');
+    if (cb) cb.title = 'Completion ' + W.missions.completion() + '%';
+    const ms = el('map-stats');
+    if (ms) {
+      ms.innerHTML =
+        '<div>Cars stolen <b>' + p.stats.carsStolen + '</b></div>' +
+        '<div>Stars lost <b>' + p.stats.starsLost + '</b></div>' +
+        '<div>Knockouts <b>' + p.stats.knockouts + '</b></div>' +
+        '<div>Race wins <b>' + p.stats.raceWins + '</b></div>' +
+        '<div>Driven <b>' + p.stats.drivenKm.toFixed(1) + ' km</b></div>' +
+        '<div>Shots fired <b>' + p.stats.shotsFired + '</b></div>';
+    }
+    H.drawBigMap();
+    show('pause-menu', true);
+  };
+
+  H.closePause = function () { show('pause-menu', false); };
+
+  // ---- shop ----
+  H.openShop = function () {
+    H.shopOpen = true;
+    show('shop', true);
+    H.renderShop();
+  };
+
+  H.closeShop = function () {
+    H.shopOpen = false;
+    show('shop', false);
+  };
+
+  H.renderShop = function () {
+    const car = W.player.inCar || W.lastCar;
+    setText('shop-cash-num', fmtCash(W.player.cash));
+    if (car) {
+      setText('shop-car-name', car.spec.name + (car.tuned ? ' \u00b7 TUNED' : '') + (car.plated ? ' \u00b7 PLATED' : '') + (car.nitro ? ' \u00b7 NITRO' : ''));
+      setText('shop-cond-num', String(Math.round(car.cond)));
+      const cf = el('shop-cond-fill');
+      if (cf) cf.style.width = clamp(car.cond, 0, 100) + '%';
+      setText('mod-tune', car.tuned ? 'TUNE: YES' : 'TUNE: NO');
+      setText('mod-plating', car.plated ? 'PLATING: YES' : 'PLATING: NO');
+      setText('mod-nitro', car.nitro ? 'NITRO: YES' : 'NITRO: NO');
+      drawShopCar(car);
+    }
+    const list = el('shop-list');
+    if (list) {
+      list.innerHTML = '';
+      for (const item of SHOP_UPGRADES) {
+        const b = document.createElement('button');
+        b.className = 'shop-item';
+        b.innerHTML = '<b>' + item.name + '</b> <span>' + fmtCash(item.price) + '</span><i>' + item.desc + '</i>';
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          W.buyUpgrade(item.id);
+          H.renderShop();
+        });
+        list.appendChild(b);
+      }
+    }
+    const list2 = el('shop-list2');
+    if (list2) {
+      list2.innerHTML = '';
+      for (const item of [...SHOP_GEAR, ...SHOP_SHOWROOM]) {
+        const b = document.createElement('button');
+        b.className = 'shop-item';
+        b.innerHTML = '<b>' + item.name + '</b> <span>' + fmtCash(item.price) + '</span><i>' + item.desc + '</i>';
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          if (SHOP_SHOWROOM.some((s) => s.id === item.id)) W.buyShowroomCar(item.id);
+          else W.buyGear(item.id);
+          H.renderShop();
+        });
+        list2.appendChild(b);
+      }
+    }
+    setText('shop-desc', 'Ibarra Customs \u2014 repairs, tunes, plating, nitro, guns and the showroom. Cash: ' + fmtCash(W.player.cash));
+  };
+
+  function drawShopCar(car) {
+    const cv = el('shop-car-canvas');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#1d212b';
+    ctx.fillRect(0, 0, cv.width, cv.height);
     const hex = '#' + car.color.toString(16).padStart(6, '0');
-    // Lift posts.
-    g.fillStyle = '#facc15';
-    g.fillRect(120, 90, 14, 130); g.fillRect(300, 90, 14, 130);
-    // Car, side view.
-    g.fillStyle = hex;
-    g.beginPath();
-    g.moveTo(90, 205); g.lineTo(100, 165); g.lineTo(140, 150); g.lineTo(200, 142);
-    g.lineTo(280, 142); g.lineTo(320, 162); g.lineTo(335, 205); g.closePath(); g.fill();
-    g.fillStyle = '#111827';
-    g.beginPath(); g.moveTo(150, 152); g.lineTo(195, 146); g.lineTo(265, 146); g.lineTo(300, 160); g.closePath(); g.fill();
-    g.fillStyle = '#111827';
-    g.beginPath(); g.arc(150, 205, 26, 0, Math.PI * 2); g.arc(285, 205, 26, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#9ca3af';
-    g.beginPath(); g.arc(150, 205, 12, 0, Math.PI * 2); g.arc(285, 205, 12, 0, Math.PI * 2); g.fill();
-    // Headlight glow.
-    g.fillStyle = 'rgba(255,247,204,.9)';
-    g.beginPath(); g.ellipse(340, 185, 26, 8, 0, 0, Math.PI * 2); g.fill();
+    ctx.fillStyle = hex;
+    const cx = cv.width / 2, cy = cv.height / 2;
+    ctx.fillRect(cx - 90, cy - 34, 180, 68);
+    ctx.fillStyle = '#141a24';
+    ctx.fillRect(cx - 45, cy - 26, 90, 52);
+    ctx.fillStyle = '#111';
+    ctx.beginPath(); ctx.arc(cx - 55, cy - 36, 16, 0, Math.PI * 2); ctx.arc(cx + 55, cy - 36, 16, 0, Math.PI * 2);
+    ctx.arc(cx - 55, cy + 36, 16, 0, Math.PI * 2); ctx.arc(cx + 55, cy + 36, 16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText(car.spec.name, cx, cy + 62);
   }
+
+  // ---- title screen ----
+  H.refreshTitle = function () {
+    const save = W.save.read();
+    const has = !!save;
+    show('btn-continue', has);
+    if (has) {
+      const when = save.savedAt ? new Date(save.savedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      setText('continue-label', 'JOB ' + (save.jobIndex + 1) + '/8 \u00b7 ' + fmtCash(save.cash) + (when ? ' \u00b7 ' + when : ''));
+      setText('title-save-note', 'Save found \u2014 continue your story.');
+    } else {
+      setText('title-save-note', 'No save yet \u2014 start a new story.');
+    }
+  };
+
+  H.showTitle = function () {
+    show('title-screen', true);
+    show('hud', false);
+    show('pause-menu', false);
+    show('shop', false);
+    show('gameover', false);
+    show('job-done', false);
+    H.refreshTitle();
+  };
+
+  H.hideTitle = function () { show('title-screen', false); };
+
+  // Wire the static buttons once.
+  H.wireButtons = function () {
+    const on = (id, fn) => {
+      const n = el(id);
+      if (n) n.addEventListener('click', (ev) => { ev.stopPropagation(); W.audio.ensure(); fn(); });
+    };
+    on('btn-new', () => W.startNewGame());
+    on('btn-continue', () => W.continueGame());
+    on('btn-how', () => show('howto', true));
+    on('btn-how-close', () => show('howto', false));
+    on('btn-resume', () => W.setPaused(false));
+    on('btn-save', () => { W.save.write(); W.notify('Game saved'); });
+    on('btn-quit', () => W.quitToTitle());
+    on('btn-shop-close', () => W.closeShop());
+    on('btn-job-next', () => H.hideJobDone());
+    on('btn-respawn', () => W.respawn());
+    const dlg = el('dialogue');
+    if (dlg) dlg.addEventListener('click', (ev) => { ev.stopPropagation(); H.hideDialog(); });
+  };
+
+  return H;
 }

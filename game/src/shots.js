@@ -1,122 +1,121 @@
-// Screenshot scenes (?shot=chase|street|garage|map&seed=1). Each one stages a real
-// game state through the game's own systems — missions, police, traffic, shop —
-// then lets the simulation run a fixed number of steps, so the frame is what a
-// short stretch of real play looks like, and the same seed always gives the same frame.
-import { createCar } from './vehicles.js';
-import { damagePerson } from './people.js';
-import { GIVERS } from './missions.js';
+// Screenshot staging (?shot=chase|street|garage|map&seed=1): set the world
+// up through the game's own systems, let the simulation run a fixed number
+// of frames, then raise window.__shotReady.
+import { LOCATIONS } from './config.js';
 
-function setCashRespect(world, cash, respect) {
-  world.player.cash = cash;
-  world.player.respect = respect;
-}
+export function stageShot(W, name) {
+  const p = W.player;
+  W.shotMode = name;
+  W.state = 'playing';
+  W.hud.hideTitle();
+  W.hud.hideGameOver();
+  W.hud.hideJobDone();
 
-export function stageChase(world) {
-  const rng = world.rng;
-  setCashRespect(world, 18450, 1100);
-  world.clockMinutes = 18 * 60 + 48;
-  // Player in a red Meridian GT, mid-chase down the boulevard.
-  const car = createCar('sport', 352, -60, 0, 0xe74c3c, rng);
-  car.speed = 30;
-  world.scene.add(car.mesh);
-  world.cars.push(car);
-  world.enterCar(car, true);
-  // Traffic ahead and alongside.
-  const spots = [[348, 10, 'sedan'], [356, 60, 'taxi'], [344, 110, 'van'], [352, 150, 'coupe'], [348, -140, 'sedan']];
-  for (const [x, z, t] of spots) {
-    const c = createCar(t, x, z, 0, undefined, rng);
-    c.speed = 11;
-    c.ai = { kind: 'traffic', target: null };
-    world.scene.add(c.mesh);
-    world.cars.push(c);
-    world.traffic.push(c);
+  if (name === 'chase') {
+    // Dante in a red Meridian GT on the boulevard, mid-chase.
+    const gt = W.spawnCar('sport', 352, -60, 0, { color: 0xc22424, owned: true });
+    p.enterCar(gt, true);
+    gt.speed = 30;
+    p.cash = 18450; p.respect = 1100;
+    W.clockMinutes = 18 * 60 + 48;
+    W.missions.jobIndex = 5;
+    W.missions.stageIndex = 0;
+    W.missions.completedJobs = 5;
+    W.missions.active = true;
+    W.missions.surviveLeft = 74;
+    W.police.setHeat(78);
+    W.input.keys.add('KeyW');
+    // Three cruisers behind + the heli, traffic ahead.
+    for (const [dx, dz] of [[-6, -34], [8, -52], [-2, -70]]) {
+      const u = W.spawnCar('cruiser', 352 + dx, -60 + dz, 0, { ai: 'police', unitName: 'TARPON-' + (40 + Math.abs(dx)), unitRole: 'PURSUE' });
+      u.speed = 26;
+      W.police.units.push(u);
+    }
+    W.spawnCar('sedan', 352, 20, 0, { ai: 'traffic' });
+    W.spawnCar('taxi', 344, 60, 0, { ai: 'traffic' });
+    W.showDialog('CELIA "LA JEFA" DUARTE', 'Every cop in the bay is coming for you, cari\u00f1o. Ninety seconds. Survive them.', '#f59e0b', 'CJ');
+    W.toast('GOLDEN HOUR \u2014 Survive the manhunt \u2014 90 seconds');
+    W.camYaw = 0;
+  } else if (name === 'street') {
+    // Dante on foot at the market, mid-fight.
+    p.x = 120; p.z = 322; p.heading = 0; p.y = 0;
+    W.camYaw = 0;
+    p.mesh.position.set(p.x, 0, p.z);
+    p.switchWeapon('smg');
+    p.weapons.smg.owned = true;
+    p.weapons.smg.mag = 24;
+    p.weapons.smg.reserve = 120;
+    p.weaponId = 'smg';
+    p.armour = 27; p.hp = 95;
+    p.cash = 7270; p.respect = 1675;
+    W.clockMinutes = 19 * 60 + 31;
+    W.missions.jobIndex = 2;
+    W.missions.stageIndex = 0;
+    W.missions.completedJobs = 2;
+    W.missions.active = true;
+    W.missions.killsTotal = 5; W.missions.killsLeft = 4; W.missions.killsDone = 1;
+    W.spawnEnemies(4, 120, 352, 'market-squeeze');
+    W.police.setHeat(34);
+    const cop = W.spawnPerson('cop', 132, 336, {});
+    W.police.footCops.push(cop);
+    // Staging grace: the enemies and the cop hold their fire until after
+    // the screenshot, so the staged HP 95 / armour 27 is what the shot shows.
+    for (const e of W.people) {
+      if (e.kind === 'enemy' || e.kind === 'cop') e.shootAt = 9999;
+    }
+    // Six peds fleeing.
+    for (let i = 0; i < 6; i++) {
+      const ped = W.spawnPed(108 + i * 5, 330 + (i % 3) * 8);
+      ped.fleeUntil = W.now + 4;
+    }
+    W.city.setMarker(120, 352, 'Clear the Tiburon crew from the market');
+    W.showDialog('CELIA "LA JEFA" DUARTE', 'Tiburon boys are taxing the market. Five of them. Make it safe again.', '#f59e0b', 'CJ');
+    W.toast('MARKET SQUEEZE \u2014 Clear the Tiburon crew (1/5)');
+    // One real shot through the firing code, for a visible tracer.
+    W.shotFired = false;
+    setTimeout(() => {
+      try {
+        if (W.state === 'playing') {
+          p.tryShoot();
+          W.shotFired = true;
+        }
+      } catch (e) { /* staging must never break the shot */ }
+    }, 600);
+  } else if (name === 'garage') {
+    // Coupe at Ibarra Customs, Dante inside, shop open.
+    const coupe = W.spawnCar('coupe', 340, 96, Math.PI / 2, {
+      color: 0xc22424, owned: true, cond: 64, tuned: true, plated: true,
+    });
+    p.enterCar(coupe, true);
+    p.cash = 18450; p.respect = 1400;
+    W.clockMinutes = 18 * 60 + 45;
+    W.missions.jobIndex = 2;
+    W.missions.stageIndex = 0;
+    W.missions.completedJobs = 2;
+    W.missions.active = true;
+    W.camYaw = Math.PI / 2;
+    W.openShop();
+    W.showDialog('TOMAS "WRENCH" IBARRA', 'She is beautiful, no? Tune, plate, nitro \u2014 I can make her fly.', '#14b8a6', 'TI');
+  } else if (name === 'map') {
+    // Pause / big-map screen with stats.
+    p.x = 96; p.z = 96; p.heading = 0;
+    p.cash = 18450; p.respect = 1400;
+    W.clockMinutes = 18 * 60 + 45;
+    p.stats.carsStolen = 23; p.stats.starsLost = 31; p.stats.knockouts = 9;
+    p.stats.raceWins = 1; p.stats.drivenKm = 48.2;
+    W.missions.completedJobs = 3;
+    W.missions.jobIndex = 3;
+    W.missions.stageIndex = 0;
+    W.missions.active = true;
+    W.city.setMarker(-80, -400, 'Next job \u2014 Dockside Ambush');
+    W.setPaused(true);
+    const side = document.getElementById('map-side');
+    if (side) {
+      const note = document.createElement('div');
+      note.className = 'map-next-job';
+      note.textContent = 'Next job \u2014 Dockside Ambush';
+      side.appendChild(note);
+    }
   }
-  // The mission: GOLDEN HOUR, survive the manhunt.
-  world.missions.startJob(5);
-  world.missions.stageTimer = 74;
-  world.police.addHeat(78, world);
-  // Three cruisers already on the tail + the heli.
-  world.police._spawnUnit(world); world.police._spawnUnit(world); world.police._spawnUnit(world);
-  world.police.units.forEach((u, i) => {
-    const spots2 = [[346, -20], [358, -95], [344, -130]];
-    u.x = spots2[i][0]; u.z = spots2[i][1];
-    u.heading = 0; u.speed = 26;
-  });
-  world.police._spawnHeli(world);
-  world.hud.showDialogue(
-    GIVERS.celia,
-    'The boat sails in two minutes, Dante! Shake that chopper and get to the pier!',
-  );
-  world.hud.objectiveToast('MISSION 6 · GOLDEN HOUR', 'LOSE THE MANHUNT BEFORE THE BOAT SAILS');
-}
-
-export function stageStreet(world) {
-  const rng = world.rng;
-  setCashRespect(world, 7270, 1675);
-  world.clockMinutes = 19 * 60 + 31;
-  world.player.x = 120; world.player.z = 322; world.player.heading = 0;
-  world.player.giveWeapon('smg');
-  world.player.switchWeapon('smg');
-  world.player.weapons.smg.mag = 24;
-  world.player.armour = 27; world.player.hp = 95;
-  // MARKET SQUEEZE: five Tiburon crew in the market; one already down.
-  // (startJob spawns the five — reuse them, don't double-spawn.)
-  world.missions.startJob(2);
-  const enemies = world.people.filter((p) => p.missionTag === 'market-squeeze');
-  const place = (e, x, z) => { e.x = x; e.z = z; e.mesh.position.set(x, 0, z); };
-  if (enemies[0]) { place(enemies[0], 128, 342); damagePerson(enemies[0], 999); world.missions.onKill(); }
-  if (enemies[1]) place(enemies[1], 104, 356);
-  if (enemies[2]) place(enemies[2], 136, 360);
-  // Pedestrians fleeing the gunfight.
-  for (let i = 0; i < 6; i++) world.spawnPed(100 + rng() * 50, 330 + rng() * 40);
-  world.police.addHeat(34, world);
-  world.police._spawnFootCop(world);
-  world.hud.showDialogue(
-    GIVERS.celia,
-    'Two down the left aisle! I’ve got the stall side, Dante.',
-  );
-  // One real shot, fired through the real gun code, for the tracer.
-  world.shotFired = true;
-}
-
-export function stageGarage(world) {
-  const rng = world.rng;
-  setCashRespect(world, 18450, 1400);
-  world.clockMinutes = 18 * 60 + 45;
-  const car = createCar('coupe', 340, 96, Math.PI / 2, 0xe74c3c, rng);
-  car.cond = 64;
-  car.tuned = true; car.plated = true;
-  world.scene.add(car.mesh);
-  world.cars.push(car);
-  world.lastCar = car;
-  world.enterCar(car, true);
-  world.missions.startJob(2);
-  world.hud.openShop(world, car);
-}
-
-export function stageMap(world) {
-  setCashRespect(world, 18450, 1400);
-  world.clockMinutes = 18 * 60 + 45;
-  world.player.x = 96; world.player.z = 96;
-  world.player.stats.carsStolen = 23;
-  world.player.stats.starsLost = 31;
-  world.player.stats.knockouts = 9;
-  world.player.stats.raceWins = 1;
-  world.player.stats.drivenKm = 48.2;
-  world.missions.completedJobs = 3;
-  world.missions.jobIndex = 3;
-  world.missions.active = true;
-  world.missions.stageIndex = 0;
-  world.setMarker(96, 96, 'Next job — Dockside Ambush');
-  world.hud.showPause(world);
-  world.paused = true;
-}
-
-export function stageShot(name, world) {
-  world.shotMode = name;
-  if (name === 'chase') stageChase(world);
-  else if (name === 'street') stageStreet(world);
-  else if (name === 'garage') stageGarage(world);
-  else if (name === 'map') stageMap(world);
-  else stageChase(world);
+  W.hudDirty = true;
 }

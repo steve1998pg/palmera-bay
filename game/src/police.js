@@ -1,315 +1,290 @@
-// Wanted level & PBPD response: heat, stars, pursuit cars, foot cops, the AIR-1
-// helicopter with its spotlight, roadblocks, and the search that lets you cool off.
-import * as THREE from 'three';
-import { createCar, steerToward, moveCar } from './vehicles.js';
-import { createPerson, updateFighter } from './people.js';
-import { pick, range, clamp } from './random.js';
+// Police & wanted: heat 0..100, stars from heat, cruiser units that chase
+// along the road graph, foot cops, the AIR-1 helicopter with a spotlight,
+// roadblocks at high wanted, and the "sight / search" visibility model.
+import * as THREE from '../vendor/three.module.min.js';
+import { UNIT_NAMES } from './config.js';
+import { clamp, angleDiff, wrapAngle } from './random.js';
+import { spawnCar, driveCar } from './vehicles.js';
 
-const UNIT_NAMES = ['TARPON', 'GECKO', 'PELICAN', 'BARRACUDA', 'CORAL', 'MARLIN', 'TIDE', 'AZUL', 'REEF', 'DUNE'];
-const STAR_HEAT = [0, 12, 32, 52, 72, 90];
-const UNITS_FOR_STARS = [0, 2, 3, 4, 6, 8];
-// Sight ranges: a cruiser spots you from further than a cop on foot.
-const SIGHT_CAR = 62;
-const SIGHT_FOOT = 42;
-const HIDE_DELAY = 3; // seconds unseen before the state flips to "search"
-const _coneUp = new THREE.Vector3(0, 1, 0);
-const _coneDir = new THREE.Vector3();
-
-function makeHeliMesh() {
-  const g = new THREE.Group();
-  const mat = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 4.2), mat(0x1e3a5f));
-  body.position.y = 0; body.castShadow = true;
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 4.5), mat(0x1e3a5f));
-  tail.position.set(0, 0.3, -3.8);
-  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.9, 1.4), mat(0x9fd8ff));
-  glass.position.set(0, 0.2, 1.6);
-  const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 3.4), mat(0x111827));
-  skidL.position.set(-0.9, -1.1, 0.2);
-  const skidR = skidL.clone(); skidR.position.x = 0.9;
-  const rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.08, 0.5), mat(0x111827));
-  rotor.position.y = 1.1;
-  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.2, 0.4), mat(0x111827));
-  tailRotor.position.set(0.35, 0.4, -5.8);
-  // Spotlight cone, additive so it reads at dusk.
-  const cone = new THREE.Mesh(
-    new THREE.ConeGeometry(7, 42, 20, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  cone.position.y = -21;
-  cone.rotation.x = Math.PI;
-  g.add(body, tail, glass, skidL, skidR, rotor, tailRotor, cone);
-  g.userData = { rotor, tailRotor, cone };
-  return g;
+export function wantedFromHeat(heat) {
+  if (heat >= 90) return 5;
+  if (heat >= 72) return 4;
+  if (heat >= 52) return 3;
+  if (heat >= 32) return 2;
+  if (heat >= 12) return 1;
+  return 0;
 }
 
-export class PoliceSystem {
-  constructor(scene, city, rng) {
-    this.scene = scene; this.city = city; this.rng = rng;
-    this.heat = 0;
-    this.wanted = 0;
-    this.state = 'clear'; // clear | sight | search
-    this.unseenTimer = 0;
-    this.searchTimer = 0;
-    this.lastSeen = { x: 0, z: 0 };
-    this.units = [];      // police cars (also in world.cars)
-    this.footCops = [];   // people with kind 'cop'
-    this.heli = null;
-    this.heliMesh = null;
-    this.roadblocks = [];
-    this.spawnCd = 0;
-    this.unitCounter = 0;
-    this.flashT = 0;
+export function unitsForStars(stars) {
+  return [0, 2, 3, 4, 6, 8][stars] || 0;
+}
+
+export function makePolice(W) {
+  const P = {
+    heat: 0, wanted: 0, state: 'clear',
+    units: [], footCops: [], heli: null,
+    unseenFor: 0, roadblockAt: 0, roadblockCars: [],
+    unitCounter: 0, lastStars: 0,
+  };
+
+  function unitName() {
+    P.unitCounter++;
+    const base = UNIT_NAMES[(P.unitCounter - 1) % UNIT_NAMES.length];
+    const num = 10 + ((P.unitCounter * 37) % 89);
+    return base + '-' + num;
   }
 
-  stars() { return this.wanted; }
-
-  addHeat(amount, world) {
-    const before = this.wanted;
-    this.heat = clamp(this.heat + amount, 0, 100);
-    this._recalcStars();
-    if (this.wanted > before && world) {
-      world.hud.flashWanted(this.wanted);
-      world.audio.blip(660, 0.15, 'square', 0.15);
-      setTimeout(() => world.audio.blip(880, 0.15, 'square', 0.15), 140);
+  function spawnUnit() {
+    const pp = W.playerPos();
+    // Spawn on a road node 70-140 m away.
+    let node = null, tries = 0;
+    while (tries++ < 40) {
+      const cand = W.city.graph.nodes[Math.floor(Math.random() * W.city.graph.nodes.length)];
+      const d = Math.hypot(cand.x - pp.x, cand.z - pp.z);
+      if (d >= 70 && d <= 140) { node = cand; break; }
     }
-  }
-  // Cool the heat down (crew abilities, respray) and re-derive the stars.
-  shedHeat(amount) {
-    this.heat = Math.max(0, this.heat - amount);
-    this._recalcStars();
-  }
-  _recalcStars() {
-    let s = 0;
-    for (let i = 5; i >= 1; i--) if (this.heat >= STAR_HEAT[i]) { s = i; break; }
-    this.wanted = s;
-  }
-  clearAll(world) {
-    this.heat = 0; this.wanted = 0; this.state = 'clear';
-    this.unseenTimer = 0; this.searchTimer = 0;
-    if (world) world.player.stats.starsLost += 1;
-  }
-
-  _spawnUnit(world) {
-    const p = world.playerPos();
-    // Spawn on a road node 70–130 m away, off the player's view where possible.
-    let node = null;
-    for (let tries = 0; tries < 12 && !node; tries++) {
-      const n = pick(this.rng, this.city.graph.nodes);
-      const d = Math.hypot(n.x - p.x, n.z - p.z);
-      if (d > 70 && d < 140) node = n;
-    }
-    if (!node) node = pick(this.rng, this.city.graph.nodes);
-    const car = createCar('cruiser', node.x, node.z, this.rng() * Math.PI * 2, 0xf1f5f9, this.rng);
-    car.ai = { kind: 'police', target: null };
-    car.unitName = pick(this.rng, UNIT_NAMES) + '-' + (10 + Math.floor(this.rng() * 89));
-    car.unitRole = 'PURSUE';
-    this.scene.add(car.mesh);
-    this.units.push(car);
-    world.cars.push(car);
+    if (!node) node = W.city.graph.nodeAt(pp.x + 100, pp.z);
+    const car = spawnCar(W, 'cruiser', node.x, node.z, Math.random() * Math.PI * 2, {
+      ai: 'police', unitName: unitName(), unitRole: 'PURSUE',
+    });
+    P.units.push(car);
     return car;
   }
 
-  _spawnFootCop(world) {
-    const p = world.playerPos();
-    const a = this.rng() * Math.PI * 2;
-    const x = p.x + Math.sin(a) * 26, z = p.z + Math.cos(a) * 26;
-    const cop = createPerson('cop', x, z, this.rng, { shirt: 0x1d4ed8, pants: 0x1e293b, cap: 0x1d4ed8, vest: true });
-    cop.unitName = 'FOOT ×1';
-    this.scene.add(cop.mesh);
-    this.footCops.push(cop);
-    world.people.push(cop);
-    return cop;
+  function removeUnit(car) {
+    const i = P.units.indexOf(car);
+    if (i >= 0) P.units.splice(i, 1);
+    if (car.heliRef) car.heliRef = null;
   }
+  P.removeUnit = removeUnit;
 
-  _spawnHeli(world) {
-    if (this.heliMesh) return;
-    const mesh = makeHeliMesh();
-    const p = world.playerPos();
-    mesh.position.set(p.x, 42, p.z - 30);
-    this.scene.add(mesh);
-    // The spotlight cone lives in the scene, not the spinning heli group, so
-    // its world-space aim below is not swept around by the rotor yaw.
-    this.scene.add(mesh.userData.cone);
-    this.heliMesh = mesh;
-    this.heli = { name: 'AIR-1', role: 'SPOTLIGHT', x: p.x, z: p.z };
-  }
+  P.addHeat = function (amount) {
+    P.heat = clamp(P.heat + amount, 0, 100);
+  };
 
-  _removeHeli() {
-    if (!this.heliMesh) return;
-    this.scene.remove(this.heliMesh.userData.cone);
-    this.scene.remove(this.heliMesh);
-    this.heliMesh = null; this.heli = null;
-  }
+  P.setHeat = function (v) {
+    P.heat = clamp(v, 0, 100);
+  };
 
-  _spawnRoadblock(world) {
-    const p = world.playerPos();
-    const car = world.playerCar;
-    const heading = car ? car.heading : world.player.heading;
-    const fx = Math.sin(heading), fz = Math.cos(heading);
-    const cx = p.x + fx * 55, cz = p.z + fz * 55;
-    for (const side of [-1, 1]) {
-      const px = cx - fz * side * 4, pz = cz + fx * side * 4;
-      const rb = createCar('cruiser', px, pz, heading + Math.PI / 2, 0xf1f5f9, this.rng);
-      rb.ai = { kind: 'roadblock' };
-      rb.unitName = 'BULWARK ' + (1 + Math.floor(this.rng() * 8));
-      rb.unitRole = 'ROADBLOCK';
-      rb.roadblockTimer = 26;
-      this.scene.add(rb.mesh);
-      this.units.push(rb);
-      world.cars.push(rb);
-      this.roadblocks.push(rb);
+  // Keep the live unit count matched to the wanted level.
+  P.syncUnits = function () {
+    const want = unitsForStars(P.wanted);
+    const alive = P.units.filter((u) => !u.dead);
+    while (alive.length < want) {
+      const u = spawnUnit();
+      alive.push(u);
     }
-    world.hud.notify('PBPD roadblock ahead — find another way!', 'bad');
-  }
-
-  // Is any unit close enough to see the player? The heli always sees you.
-  _isPlayerSeen(p) {
-    for (const u of this.units) {
-      if (Math.hypot(u.x - p.x, u.z - p.z) < SIGHT_CAR) return true;
-    }
-    for (const c of this.footCops) {
-      if (!c.dead && Math.hypot(c.x - p.x, c.z - p.z) < SIGHT_FOOT) return true;
-    }
-    return !!this.heli;
-  }
-
-  // Grow the response toward what the current wanted level calls for.
-  _maintainStrength(world) {
-    const wantUnits = UNITS_FOR_STARS[this.wanted];
-    if (this.units.length < wantUnits) this._spawnUnit(world);
-    else if (this.wanted >= 2 && this.footCops.filter((c) => !c.dead).length < this.wanted - 1) this._spawnFootCop(world);
-    if (this.wanted >= 3 && !this.heli) this._spawnHeli(world);
-    if (this.wanted >= 4 && this.roadblocks.length === 0 && this.rng() < 0.4) this._spawnRoadblock(world);
-    this.spawnCd = 2.2;
-  }
-
-  update(dt, world) {
-    const p = world.playerPos();
-    const player = world.player;
-    this.flashT += dt;
-    // Light bars flash.
-    for (const u of this.units) {
-      const bar = u.mesh.userData.lightBar;
-      if (bar) {
-        const on = Math.floor(this.flashT * 6) % 2 === 0;
-        bar.children[0].material.emissive.setHex(on ? 0xef4444 : 0x330000);
-        bar.children[1].material.emissive.setHex(on ? 0x111133 : 0x3b82f6);
+    // Extra units beyond the wanted level drive off and despawn.
+    if (alive.length > want) {
+      for (let i = want; i < alive.length; i++) {
+        const u = alive[i];
+        if (!u.leaving) {
+          u.leaving = true;
+          u.leaveAt = W.now + 6;
+        }
       }
     }
-    // --- visibility: any unit close, or the heli overhead ---
-    const seen = this._isPlayerSeen(p);
-    if (seen) {
-      this.unseenTimer = 0;
-      this.lastSeen = { x: p.x, z: p.z };
-      if (this.wanted > 0) this.state = 'sight';
+    for (const u of [...P.units]) {
+      if (u.leaving && W.now > u.leaveAt) {
+        removeUnit(u);
+        // Remove the car mesh from the world as well.
+        const ci = W.cars.indexOf(u);
+        if (ci >= 0) { W.scene.remove(u.mesh); W.cars.splice(ci, 1); }
+      }
+    }
+  };
+
+  // One police cruiser: follow the graph toward the player, ram up close.
+  function updateUnit(u, dt, now) {
+    if (u.dead || u.burning) return;
+    const pp = W.playerPos();
+    const px = pp.x + (W.playerVel.x || 0) * 0.6;
+    const pz = pp.z + (W.playerVel.z || 0) * 0.6;
+    const d = Math.hypot(pp.x - u.x, pp.z - u.z);
+    u.unitRole = d < 12 ? 'RAMMING' : d < 30 ? 'CLOSING IN' : 'PURSUE';
+    if (d < 12) {
+      // Ram straight at the player.
+      const wantH = Math.atan2(pp.x - u.x, pp.z - u.z);
+      const diff = angleDiff(wantH, u.heading);
+      driveCar(W, u, { throttle: 1, steer: diff > 0.15 ? 1 : diff < -0.15 ? -1 : 0, nitro: false }, dt);
     } else {
-      this.unseenTimer += dt;
-      if (this.wanted > 0 && this.unseenTimer > HIDE_DELAY) this.state = 'search';
-    }
-    // --- heat decay when hidden ---
-    if (this.wanted > 0 && !seen && this.unseenTimer > HIDE_DELAY) {
-      this.heat -= dt * (this.wanted <= 2 ? 7 : 4.5);
-      if (this.heat <= 0) { this.clearAll(world); world.hud.notify('You lost them. The heat is off — for now.', 'good'); }
-      else this._recalcStars();
-    }
-    // --- spawn to strength ---
-    this.spawnCd -= dt;
-    if (this.wanted > 0 && this.spawnCd <= 0) this._maintainStrength(world);
-    if (this.wanted < 3) this._removeHeli();
-    // --- police car pursuit ---
-    for (let i = this.units.length - 1; i >= 0; i--) {
-      const u = this.units[i];
-      if (u.dead || u.cond <= 0) {
-        if (!u.burning) { u.burning = true; u.burnTime = 0; world.onCarBurning(u); }
-        continue;
-      }
-      if (u.ai.kind === 'roadblock') {
-        u.roadblockTimer -= dt;
-        if (u.roadblockTimer <= 0 || Math.hypot(u.x - p.x, u.z - p.z) < 8) {
-          u.ai.kind = 'police'; // joins the chase
-          const rb = this.roadblocks.indexOf(u);
-          if (rb >= 0) this.roadblocks.splice(rb, 1);
+      if (!u.path || u.pathIdx >= u.path.length || now > u.repathAt) {
+        // BFS over the road graph to the player's nearest node.
+        const g = W.city.graph;
+        const start = g.nodeAt(u.x, u.z);
+        const goal = g.nodeAt(px, pz);
+        const prev = new Map();
+        const q = [start];
+        prev.set(start, null);
+        while (q.length) {
+          const n = q.shift();
+          if (n === goal) break;
+          for (const m of g.neighbors(n)) {
+            if (!prev.has(m)) { prev.set(m, n); q.push(m); }
+          }
         }
-        continue;
-      }
-      // Predict where the player will be, aim there; ram when close.
-      const lead = 0.6;
-      const px = p.x + (world.playerVel ? world.playerVel.x * lead : 0);
-      const pz = p.z + (world.playerVel ? world.playerVel.z * lead : 0);
-      const d = steerToward(u, px, pz, dt, u.spec.top * (this.wanted >= 4 ? 1.06 : 0.98), true);
-      u.unitRole = d < 12 ? 'RAMMING' : d < 30 ? 'CLOSING IN' : 'PURSUE';
-      moveCar(u, dt, this.city, null);
-      // If the player is on foot and a cruiser gets close, a cop gets out.
-      if (!world.player.inCar && d < 9 && this.footCops.filter((c) => !c.dead).length < 3 && this.rng() < dt * 0.25) {
-        this._spawnFootCop(world);
-      }
-    }
-    // --- foot cops fight ---
-    for (let i = this.footCops.length - 1; i >= 0; i--) {
-      const c = this.footCops[i];
-      if (c.dead) continue;
-      const shot = updateFighter(c, dt, p, this.city, true);
-      if (shot) world.onEnemyShot(shot, c);
-    }
-    // --- helicopter follows, spotlight tracks the player ---
-    if (this.heliMesh) {
-      const h = this.heliMesh;
-      const tx = p.x + 14, tz = p.z - 18;
-      h.position.x += (tx - h.position.x) * Math.min(1, dt * 0.8);
-      h.position.z += (tz - h.position.z) * Math.min(1, dt * 0.8);
-      h.position.y = 42 + Math.sin(performance.now() / 900) * 1.5;
-      h.rotation.y += dt * 0.25;
-      h.userData.rotor.rotation.y += dt * 22;
-      h.userData.tailRotor.rotation.x += dt * 18;
-      this.heli.x = h.position.x; this.heli.z = h.position.z;
-      // Spotlight cone: narrow at the heli, wide pool of light on the ground
-      // at the player. Apex is the cone's local +Y, aimed from the player's
-      // ground point up at the heli and stretched so the beam spans exactly
-      // heli -> player. (The old code called lookAt and then overwrote
-      // rotation.x with pi/2 + atan2(dz, 40) — measured from the horizontal,
-      // so the beam pointed at the road well behind the player.)
-      const cone = h.userData.cone;
-      const dx = h.position.x - p.x, dz = h.position.z - p.z;
-      const len = Math.hypot(dx, 42, dz);
-      cone.position.set((h.position.x + p.x) / 2, 21, (h.position.z + p.z) / 2);
-      cone.scale.set(1, len / 42, 1);
-      _coneDir.set(dx, 42, dz).normalize();
-      cone.quaternion.setFromUnitVectors(_coneUp, _coneDir);
-    }
-    // --- prune burnt-out units ---
-    for (let i = this.units.length - 1; i >= 0; i--) {
-      const u = this.units[i];
-      if (u.burning) {
-        u.burnTime += dt;
-        if (u.burnTime > 6) {
-          this.scene.remove(u.mesh);
-          const wi = world.cars.indexOf(u);
-          if (wi >= 0) world.cars.splice(wi, 1);
-          this.units.splice(i, 1);
+        if (prev.has(goal)) {
+          const path = [];
+          let cur = goal;
+          while (cur) { path.unshift(cur); cur = prev.get(cur); }
+          u.path = path; u.pathIdx = 0;
+        } else {
+          u.path = [goal]; u.pathIdx = 0;
         }
+        u.repathAt = now + 3;
       }
+      const wp = u.path[Math.min(u.pathIdx, u.path.length - 1)];
+      const wd = Math.hypot(wp.x - u.x, wp.z - u.z);
+      if (wd < 8) u.pathIdx++;
+      else {
+        const wantH = Math.atan2(wp.x - u.x, wp.z - u.z);
+        const diff = angleDiff(wantH, u.heading);
+        driveCar(W, u, { throttle: 1, steer: diff > 0.15 ? 1 : diff < -0.15 ? -1 : 0, nitro: false }, dt);
+      }
+    }
+    // A foot cop climbs out when the player is on foot and the cruiser is close.
+    if (P.wanted >= 2 && !W.player.inCar && d < 9 && !u.droppedCop) {
+      u.droppedCop = true;
+      const cop = W.spawnPerson('cop', u.x + 2, u.z + 2, {});
+      P.footCops.push(cop);
     }
   }
 
-  // Dispatch panel rows for the HUD.
-  dispatchRows(world) {
-    const rows = [];
-    const p = world.playerPos();
-    for (const u of this.units) {
-      if (u.dead) continue;
-      rows.push({
-        name: u.unitName || 'PBPD UNIT',
-        dist: Math.round(Math.hypot(u.x - p.x, u.z - p.z)) + ' m',
-        role: u.unitRole || 'PURSUE',
-        cls: u.unitRole === 'RAMMING' ? '' : u.unitRole === 'ROADBLOCK' ? 'amber' : u.unitRole === 'SPOTLIGHT' ? 'blue' : 'grey',
-      });
+  function updateHeli(dt, now) {
+    const pp = W.playerPos();
+    if (P.wanted >= 3) {
+      if (!P.heli) {
+        const grp = new THREE.Group();
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(3.4, 1.4, 6),
+          new THREE.MeshLambertMaterial({ color: 0x223344 })
+        );
+        grp.add(body);
+        const rotor = new THREE.Mesh(
+          new THREE.BoxGeometry(9, 0.12, 0.6),
+          new THREE.MeshLambertMaterial({ color: 0x111111 })
+        );
+        rotor.position.y = 1;
+        grp.add(rotor);
+        const cone = new THREE.Mesh(
+          new THREE.ConeGeometry(9, 42, 16, 1, true),
+          new THREE.MeshBasicMaterial({ color: 0xfff6c8, transparent: true, opacity: 0.16, side: THREE.DoubleSide })
+        );
+        cone.position.y = -21;
+        grp.add(cone);
+        grp.userData.rotor = rotor;
+        grp.userData.cone = cone;
+        grp.position.set(pp.x + 40, 46, pp.z - 30);
+        W.scene.add(grp);
+        P.heli = { name: 'AIR-1', x: grp.position.x, z: grp.position.z, mesh: grp };
+      }
+      const h = P.heli;
+      // Hover ahead of the player and track them.
+      const tx = pp.x + (W.playerVel.x || 0) * 2;
+      const tz = pp.z + (W.playerVel.z || 0) * 2;
+      h.mesh.position.x += (tx - h.mesh.position.x) * 0.4 * dt + Math.sin(now * 0.7) * 0.4 * dt;
+      h.mesh.position.z += (tz - h.mesh.position.z) * 0.4 * dt + Math.cos(now * 0.5) * 0.4 * dt;
+      h.mesh.position.y = 46 + Math.sin(now * 0.9) * 1.5;
+      h.mesh.userData.rotor.rotation.y += dt * 18;
+      h.x = h.mesh.position.x; h.z = h.mesh.position.z;
+      // Spotlight cone: from the heli to the player, centred between them,
+      // aimed with a quaternion from +Y toward the heli->player direction.
+      const cone = h.mesh.userData.cone;
+      const dir = new THREE.Vector3(pp.x - h.x, -h.mesh.position.y, pp.z - h.z).normalize();
+      // The cone is a child of the (unrotated) heli group, so its local
+      // position is just the world midpoint minus the heli position.
+      cone.position.set((pp.x - h.x) / 2, -h.mesh.position.y / 2, (pp.z - h.z) / 2);
+      const up = new THREE.Vector3(0, 1, 0);
+      cone.quaternion.setFromUnitVectors(up, dir.clone().negate());
+    } else if (P.heli) {
+      W.scene.remove(P.heli.mesh);
+      P.heli = null;
     }
-    if (this.heli) rows.push({ name: 'AIR-1', dist: Math.round(Math.hypot(this.heli.x - p.x, this.heli.z - p.z)) + ' m', role: 'SPOTLIGHT', cls: 'blue' });
-    for (const c of this.footCops) {
-      if (c.dead) continue;
-      rows.push({ name: 'FOOT ×1', dist: Math.round(Math.hypot(c.x - p.x, c.z - p.z)) + ' m', role: 'FOOT CHASE', cls: 'grey' });
-    }
-    return rows.slice(0, 6);
   }
+
+  function updateRoadblock(dt, now) {
+    if (P.wanted >= 4 && now > P.roadblockAt) {
+      P.roadblockAt = now + 26;
+      const pp = W.playerPos();
+      const fx = Math.sin(W.player.heading), fz = Math.cos(W.player.heading);
+      for (const side of [-1, 1]) {
+        const bx = pp.x + fx * 55 + (-fz) * side * 5;
+        const bz = pp.z + fz * 55 + fx * side * 5;
+        const car = spawnCar(W, 'cruiser', bx, bz, W.player.heading + Math.PI / 2, {
+          ai: 'roadblock', unitName: unitName(), unitRole: 'ROADBLOCK',
+        });
+        P.units.push(car);
+        P.roadblockCars.push(car);
+      }
+      W.notify('ROADBLOCK AHEAD');
+    }
+  }
+
+  P.update = function (dt, now) {
+    const pp = W.playerPos();
+    const prevWanted = P.wanted;
+    P.wanted = wantedFromHeat(P.heat);
+    // Visibility: a cruiser within 62 m, a foot cop within 42 m, or the heli.
+    let seen = !!P.heli;
+    if (!seen) {
+      for (const u of P.units) {
+        if (!u.dead && Math.hypot(u.x - pp.x, u.z - pp.z) < 62) { seen = true; break; }
+      }
+    }
+    if (!seen) {
+      for (const c of P.footCops) {
+        if (!c.dead && Math.hypot(c.x - pp.x, c.z - pp.z) < 42) { seen = true; break; }
+      }
+    }
+    if (seen) {
+      P.state = 'sight';
+      P.unseenFor = 0;
+    } else {
+      P.unseenFor += dt;
+      if (P.unseenFor > 3) {
+        P.state = 'search';
+        const rate = P.wanted >= 3 ? 4.5 : 7;
+        const before = P.heat;
+        P.heat = Math.max(0, P.heat - rate * dt);
+        P.wanted = wantedFromHeat(P.heat);
+        if (before > 0 && P.heat === 0 && prevWanted > 0) {
+          W.player.stats.starsLost++;
+          W.notify('You lost them');
+        }
+      }
+    }
+    P.syncUnits();
+    for (const u of [...P.units]) updateUnit(u, dt, now);
+    updateHeli(dt, now);
+    updateRoadblock(dt, now);
+    // Foot cops: keep at most wanted-1 alive.
+    const maxCops = Math.max(0, P.wanted - 1);
+    const liveCops = P.footCops.filter((c) => !c.dead);
+    if (liveCops.length < maxCops && P.wanted >= 2) {
+      const cop = W.spawnPerson('cop', pp.x + 26, pp.z + 18, {});
+      P.footCops.push(cop);
+    }
+    P.footCops = P.footCops.filter((c) => !c.dead || W.now - c.deathAt < 14);
+    if (P.wanted !== prevWanted) {
+      if (P.wanted > prevWanted) W.flashWanted();
+    }
+  };
+
+  P.clearAll = function () {
+    for (const u of [...P.units]) {
+      const i = W.cars.indexOf(u);
+      if (i >= 0) { W.scene.remove(u.mesh); W.cars.splice(i, 1); }
+    }
+    P.units = [];
+    P.roadblockCars = [];
+    for (const c of [...P.footCops]) {
+      const i = W.people.indexOf(c);
+      if (i >= 0) { W.scene.remove(c.mesh); W.people.splice(i, 1); }
+    }
+    P.footCops = [];
+    if (P.heli) { W.scene.remove(P.heli.mesh); P.heli = null; }
+    P.heat = 0; P.wanted = 0; P.state = 'clear'; P.unseenFor = 0;
+  };
+
+  return P;
 }
