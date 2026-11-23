@@ -37,6 +37,13 @@ button { cursor: pointer; font-family: inherit; }
 #mission-stage-fill { height: 4px; background: var(--gold); width: 0%; margin-top: 4px; border-radius: 2px; }
 #mission-next { font-size: 11px; color: var(--blue-bright); margin-top: 6px; }
 
+/* Taxi meter, under the mission card */
+#taxi-meter { position: absolute; top: 190px; left: 14px; background: var(--panel); border-left: 4px solid #e8b93a; padding: 10px 14px; border-radius: var(--radius); min-width: 200px; }
+#taxi-meter-title { font-size: 11px; letter-spacing: 2px; color: #e8b93a; font-weight: 700; }
+#taxi-meter-fare { font-size: 26px; font-weight: 800; color: var(--green); }
+#taxi-meter-dest { font-size: 12px; color: var(--cream); margin-top: 2px; }
+#taxi-meter-time { font-size: 20px; font-weight: 800; color: #ff6b5e; margin-top: 2px; }
+
 /* Dispatch panel */
 #dispatch { position: absolute; top: 14px; left: 370px; background: var(--panel); padding: 8px 12px; border-radius: var(--radius); min-width: 230px; }
 #dispatch-head { font-size: 11px; letter-spacing: 2px; color: var(--blue); font-weight: 700; }
@@ -126,6 +133,7 @@ button { cursor: pointer; font-family: inherit; }
 #map-side { max-width: 300px; font-size: 14px; line-height: 1.8; }
 #map-side h2 { letter-spacing: 3px; margin-bottom: 8px; }
 #map-key { font-size: 12px; color: var(--ink-dim); margin-bottom: 10px; line-height: 1.5; }
+.map-next-job { color: var(--gold-soft); font-weight: 700; margin-bottom: 10px; }
 #complete-bar { width: 100%; height: 10px; background: rgba(255, 255, 255, 0.15); border-radius: 5px; margin-top: 4px; }
 #complete-fill { height: 100%; background: var(--green); width: 0%; border-radius: 5px; }
 #pause-buttons { display: flex; gap: 12px; }

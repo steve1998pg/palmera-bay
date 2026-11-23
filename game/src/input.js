@@ -37,6 +37,19 @@ export function makeInput(W) {
   window.addEventListener('blur', () => {
     I.keys.clear();
     I.mouseDown = false;
+    // A stale look delta must not swing the camera when the player tabs
+    // back in minutes later.
+    I.mouseDX = 0;
+    I.mouseDY = 0;
+  });
+
+  // Same treatment when the tab is hidden: no stuck keys, no stale delta.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) return;
+    I.keys.clear();
+    I.mouseDown = false;
+    I.mouseDX = 0;
+    I.mouseDY = 0;
   });
 
   canvas.addEventListener('mousedown', (e) => {

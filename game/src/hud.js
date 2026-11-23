@@ -377,9 +377,26 @@ export function makeHud(W) {
     refreshTopRight(p);
     refreshLoadout(p);
     refreshVitals(p, playing);
+    refreshTaxi();
     H.updatePrompt();
     if (playing) H.drawMinimap();
   };
+
+  // Taxi meter: visible only while a fare is riding — quoted fare, the
+  // destination district with the metres left, and the meter counting down.
+  function refreshTaxi() {
+    const meter = el('taxi-meter');
+    if (!meter) return;
+    const info = W.taxi ? W.taxi.hudInfo() : null;
+    if (!info || info.phase !== 'riding') {
+      meter.classList.add('hidden');
+      return;
+    }
+    meter.classList.remove('hidden');
+    setText('taxi-meter-fare', fmtCash(info.fare));
+    setText('taxi-meter-dest', info.destName + ' \u00b7 ' + info.dist + 'm');
+    setText('taxi-meter-time', fmtTime(info.timeLeft));
+  }
 
   H.updatePrompt = function () {
     const p = W.player;
@@ -400,10 +417,13 @@ export function makeHud(W) {
       else if (near(locs.raceStart, 14)) text = 'E STREET RACE \u2014 $500 ENTRY \u00b7 WIN $1,200';
       else if (near(locs.safehouse, 12)) text = 'SAFEHOUSE \u2014 PROGRESS SAVED';
       else if (W.hintDeliver) text = 'You need a car for this drop';
+      else if (W.taxi && W.taxi.nearPassenger()) text = 'T PICK UP FARE \u2014 CAB WORK PAYS';
     } else if (near(locs.raceStart, 14)) {
       text = 'E STREET RACE \u2014 $500 ENTRY \u00b7 WIN $1,200';
     } else if (near(locs.garage, 16)) {
       text = 'G IBARRA CUSTOMS \u2014 GARAGE & GUNS';
+    } else if (W.taxi && W.taxi.nearPassenger()) {
+      text = 'T PICK UP FARE \u2014 CAB WORK PAYS';
     }
     if (text) {
       prompt.textContent = text;
@@ -449,6 +469,8 @@ export function makeHud(W) {
         ['Stars lost', p.stats.starsLost],
         ['Knockouts', p.stats.knockouts],
         ['Race wins', p.stats.raceWins],
+        ['Taxi fares', p.stats.faresCompleted || 0],
+        ['Taxi earned', fmtCash(p.stats.faresEarned || 0)],
         ['Driven', p.stats.drivenKm.toFixed(1) + ' km'],
         ['Shots fired', p.stats.shotsFired],
       ];

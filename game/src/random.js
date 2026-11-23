@@ -41,6 +41,15 @@ export function dist2(ax, az, bx, bz) {
   return dx * dx + dz * dz;
 }
 
+// A uniform random point inside a disc of the given radius, as an {x, z}
+// offset from the origin. The square-root keeps the density even instead
+// of bunching points near the centre.
+export function randomOffset(rng, radius) {
+  const a = rng() * Math.PI * 2;
+  const r = radius * Math.sqrt(rng());
+  return { x: Math.cos(a) * r, z: Math.sin(a) * r };
+}
+
 // Shortest signed turn from heading b to heading a, in (-PI, PI].
 export function angleDiff(a, b) {
   const wrapped = (((a - b + Math.PI) % TAU) + TAU) % TAU;

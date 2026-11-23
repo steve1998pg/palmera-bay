@@ -40,6 +40,10 @@ function validPort(raw) {
 }
 
 const args = process.argv.slice(2);
+if (args.includes('--help') || args.includes('-h')) {
+  console.log('Palmera Bay static server\n  node serve.ts [--port 8080] [--host 127.0.0.1]\nServes the game/ folder; paths outside it are refused with 403.');
+  process.exit(0);
+}
 const port = validPort(flagValue(args, '--port', '8080'));
 const host = flagValue(args, '--host', '127.0.0.1');
 
@@ -72,6 +76,7 @@ function serveFile(file, req, res) {
     'content-type': MIME[extname(file).toLowerCase()] || 'application/octet-stream',
     'content-length': size,
     'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
   });
   if (req.method === 'HEAD') {
     res.end();

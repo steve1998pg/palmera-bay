@@ -283,6 +283,9 @@ export function makeMissions(W) {
       M.failJob = -1;
       M.startJob(j);
     }
+    // Stash pickups are always live — including after the last job, when
+    // the tracker goes quiet and the player is just roaming the bay.
+    collectStashes();
     if (!M.active) {
       // A side race can run outside jobs.
       if (M.race && M.race.side) M.updateRace(dt);
@@ -296,8 +299,17 @@ export function makeMissions(W) {
       const tick = STAGE_TICK[stage.type];
       if (tick) tick(stage, dt);
     }
-    // Stash pickups are always live.
-    collectStashes();
+  };
+
+  // Free roam for side systems (taxi fares): no race running, and the
+  // current stage is travel or pickup — never a timed race, a manhunt, or
+  // a firefight. With no job active at all, the whole bay is free roam.
+  M.isFreeRoam = function () {
+    if (M.race) return false;
+    if (!M.active) return true;
+    const stage = M.stage();
+    if (!stage) return true;
+    return stage.type !== 'race' && stage.type !== 'survive' && stage.type !== 'kill';
   };
 
   // Human-readable objective label for the HUD (with live kill counts).

@@ -26,7 +26,7 @@ export function makePlayer(W) {
     inCar: null, weaponId: 'pistol',
     weapons: {},
     crewCd: { nico: 0, tomas: 0, sofia: 0 },
-    stats: { carsStolen: 0, starsLost: 0, knockouts: 0, raceWins: 0, drivenKm: 0, shotsFired: 0 },
+    stats: { carsStolen: 0, starsLost: 0, knockouts: 0, raceWins: 0, drivenKm: 0, shotsFired: 0, faresCompleted: 0, faresEarned: 0 },
     fireCd: 0, reloadT: 0, reloading: false,
     lastDamageAt: -99, onGround: true,
     safehouseT: 0, saveT: 0, walkPhase: 0,
@@ -285,6 +285,8 @@ export function makePlayer(W) {
     p.z = res.z;
     p.mesh.visible = true;
     W.lastCar = car;
+    // Stepping out mid-fare ends the ride (the taxi module decides).
+    if (W.taxi) W.taxi.onExitCar();
     W.hudDirty = true;
     return true;
   };
@@ -349,7 +351,7 @@ function driveStep(W, p, dt) {
   p.speed = Math.abs(car.speed);
   p.stats.drivenKm += Math.abs(car.speed) * dt / 1000;
   W.playerVel = { x: Math.sin(car.heading) * car.speed, z: Math.cos(car.heading) * car.speed };
-  if (I.mouseDown) p.tryShoot();
+  if (I.mouseDown || I.down('KeyF')) p.tryShoot();
   W.audio.setEngine(Math.abs(car.speed) / (car.spec.top || 30), true);
 }
 
@@ -399,7 +401,8 @@ function walkStep(W, p, dt) {
   animatePlayerWalk(p, dt);
   p.mesh.position.set(p.x, p.y, p.z);
   p.mesh.rotation.y = p.heading;
-  if (I.mouseDown) p.tryShoot();
+  // Click or F fires, per the control scheme.
+  if (I.mouseDown || I.down('KeyF')) p.tryShoot();
   W.audio.setEngine(0, false);
 }
 

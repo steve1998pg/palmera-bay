@@ -117,6 +117,12 @@ export function makeAudio() {
   A.punch = function () { noiseBurst(0.09, 0.35, 700); tone(120, 0.1, 'sine', 0.25, 0, 60); };
   A.missionDone = function () { arpeggio([523, 659, 784, 1047], 0.22, 0.13, 'triangle', 0.2); };
   A.busted = function () { arpeggio([392, 330, 262, 196], 0.3, 0.16, 'triangle', 0.2); };
+  // Taxi fares: a bright two-note hail when a fare climbs in, a rising
+  // five-note chime when the meter is paid, and a flat slide down when
+  // the passenger bails.
+  A.taxiPickup = function () { arpeggio([659, 880], 0.12, 0.1, 'triangle', 0.18); };
+  A.taxiDropoff = function () { arpeggio([523, 659, 784, 1047, 1319], 0.14, 0.09, 'triangle', 0.18); };
+  A.taxiCancel = function () { tone(220, 0.25, 'square', 0.12, 0, 160); };
   A.explosion = function () {
     noiseBurst(0.7, 0.6, 500);
     tone(90, 0.6, 'sine', 0.5, 0, 35);

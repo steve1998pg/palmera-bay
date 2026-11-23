@@ -38,6 +38,11 @@ No build step and no network — three.js is vendored locally under
   that scatters the police).
 - **Side activities** — a $500 street race and 12 hidden stashes worth
   $150 each.
+- **Taxi fares** — in free roam, residents in yellow shirts wave for a
+  cab on the sidewalks. Press T near one to pick them up, then drive them
+  across the bay before the meter runs out: a smooth ride pays the quoted
+  fare, a quick one adds a 25% tip, and a hard crash sends the passenger
+  walking away. Fares never interrupt the story jobs.
 - **Radio** — three fully synthesized WebAudio stations: Palmera FM, Radio
   Mango, Static Coast.
 - **Progression** — respect ranks from NOBODY to BAY BOSS, cash, saves in
@@ -55,6 +60,7 @@ No build step and no network — three.js is vendored locally under
 | Click / F | Shoot / punch |
 | 1–5 | Weapons · Q cycle · R reload |
 | Z / X / V | Nico / Tomas / Sofia |
+| T | Pick up a taxi fare (free roam) |
 | M | Map & stats · P / Esc pause · C radio · G garage |
 
 ## Tech
@@ -68,6 +74,6 @@ No build step and no network — three.js is vendored locally under
 - `game/index.html` + `game/css/style.css` — page and HUD
 - `game/src/` — one module per system: `city`, `player`, `police`,
   `missions`, `people`, `vehicles`, `audio`, `hud`, `input`, `save`,
-  `shots`, `config`, `random`, `main`
+  `shots`, `config`, `random`, `taxi`, `main`
 - `main.ts` / `serve.ts` — dossier builder and static server
 - `screenshots/` — the 4 bounty screenshots

@@ -176,6 +176,30 @@ export const RACE_SIDE = {
   checkpoints: [[352, -320], [352, -40], [352, 220], [288, 288], [96, 288], [96, 96], [352, 96]],
 };
 
+// Taxi fares: the free-roam side job. A fare is quoted from the straight
+// distance to the destination, the meter is the distance divided by a
+// relaxed cruising speed plus slack, and a quick arrival earns a tip.
+export const TAXI = {
+  baseFare: 25, // flat pickup fee, $
+  perMeter: 0.35, // $ per metre of straight-line distance
+  maxFare: 400, // the longest ride never pays more than this
+  timePerMeter: 1 / 12, // seconds of meter per metre (12 m/s cruise)
+  timeSlack: 30, // extra seconds on every meter
+  tipFraction: 0.25, // +25% when more than half the meter is left
+  respectPerFare: 5, // respect for a completed fare
+  pickupRange: 5, // press T within this many metres on foot
+  pickupRangeCar: 7, // ...or this many metres from the driver's seat
+  arriveRange: 12, // within this many metres of the destination: paid
+  spawnDelayMin: 18, // seconds between fares, minimum
+  spawnDelayMax: 40, // seconds between fares, maximum
+  waitTimeout: 75, // a waiting fare gives up after this many seconds
+  minSpawnDist: 60, // fares never spawn closer than this to the player
+  minDestDist: 150, // destinations are at least this far away
+  passengerTint: 0xe8b93a, // the yellow shirt a fare waves in
+  followSpeed: 4.6, // m/s: a fare trails Dante to the car
+  hardCrashDrop: 14, // m/s lost in one frame counts as a hard crash
+};
+
 export const RADIO = [
   { id: 'palmera', freq: '98.6', name: 'PALMERA FM', song: 'Golden Static', bpm: 96, root: 55, minor: true, wave: 'sawtooth' },
   { id: 'mango', freq: '101.2', name: 'RADIO MANGO', song: 'Guava Sunrise', bpm: 116, root: 65.41, minor: false, wave: 'square' },

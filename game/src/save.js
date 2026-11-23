@@ -19,6 +19,18 @@ function objectOrNull(value) {
   return value && typeof value === 'object' ? value : null;
 }
 
+// Stats from an older save may miss fields a newer build added (taxi
+// fares landed after the first saves). Coerce every known counter to a
+// finite number so the HUD never prints "undefined".
+function sanitizeStats(raw) {
+  const s = objectOrNull(raw) || {};
+  const out = {};
+  for (const key of ['carsStolen', 'starsLost', 'knockouts', 'raceWins', 'drivenKm', 'shotsFired', 'faresCompleted', 'faresEarned']) {
+    out[key] = finiteNumber(s[key], 0);
+  }
+  return out;
+}
+
 export function makeSave(W) {
   const S = {};
 
@@ -92,7 +104,7 @@ export function makeSave(W) {
       completedJobs: wholeIn(data.completedJobs, 0, 8, 0),
       weaponId: typeof data.weaponId === 'string' ? data.weaponId : 'pistol',
       weapons: objectOrNull(data.weapons),
-      stats: objectOrNull(data.stats),
+      stats: sanitizeStats(data.stats),
       clockMinutes: finiteNumber(data.clockMinutes, DEFAULT_CLOCK),
       stashesTaken: Array.isArray(data.stashesTaken) ? data.stashesTaken : null,
       carMods: objectOrNull(data.carMods),

@@ -113,6 +113,13 @@ export function spawnCar(W, type, x, z, heading, opts = {}) {
     unitName: opts.unitName || null, unitRole: opts.unitRole || null,
     path: null, pathIdx: 0, repathAt: 0, stuckAt: 0, stuckX: x, stuckZ: z,
     flash: 0, explodeAt: 0,
+    // Last hard impact, for systems that care (the taxi meter cancels a
+    // fare when its cab takes a real hit). -99 means "never".
+    lastHardHitAt: -99, lastImpact: 0,
+    // Last time this car took collision damage. A crash is one impact:
+    // two cars pressed together must not deal damage every frame, or a
+    // parked car is ground to scrap in seconds by a single pushy cruiser.
+    lastRamAt: -99,
   };
   W.cars.push(car);
   return car;
@@ -187,6 +194,8 @@ export function driveCar(W, car, drive, dt) {
     if (impact > 20) {
       car.speed *= -0.35;
       hardHit = true;
+      car.lastHardHitAt = W.now;
+      car.lastImpact = impact;
       damageCar(W, car, (impact - 18) * 1.1);
     } else if (impact > 0.5) {
       // Grind along the wall instead of bouncing straight back off it.
@@ -210,9 +219,13 @@ export function driveCar(W, car, drive, dt) {
   return hardHit;
 }
 
-function carAheadBlocked(W, car) {
+// Is there a car directly ahead of `car` (within 9 m, 2.4 m to the side)?
+// Traffic uses it to slow down; the police use it to lift off instead of
+// grinding a parked car to scrap. `except` is skipped — the police pass the
+// player's driven car there, so ramming a getaway car still works.
+export function carAheadBlocked(W, car, except) {
   for (const other of W.cars) {
-    if (other === car || other.dead) continue;
+    if (other === car || other === except || other.dead) continue;
     const ox = other.x - car.x;
     const oz = other.z - car.z;
     if (Math.hypot(ox, oz) >= 9) continue;
@@ -293,10 +306,24 @@ export function collideCars(W) {
       b.z += nz * push;
       const rel = Math.abs(a.speed - b.speed);
       if (rel > 6) {
-        damageCar(W, a, rel * 0.5);
-        damageCar(W, b, rel * 0.5);
+        // Shove and slow every frame so the cars separate, but damage only
+        // once a second per car: a sustained push is one crash, not a
+        // dozen. Without the gate, a cruiser leaning on a parked car deals
+        // damage on every frame of contact and kills it in seconds.
+        if (W.now - a.lastRamAt > 1 && W.now - b.lastRamAt > 1) {
+          damageCar(W, a, rel * 0.5);
+          damageCar(W, b, rel * 0.5);
+          a.lastRamAt = W.now;
+          b.lastRamAt = W.now;
+        }
         a.speed *= 0.7;
         b.speed *= 0.7;
+        // A real smash, not a parking nudge: stamp both cars so a taxi
+        // fare riding in either one knows it just took a hit.
+        a.lastHardHitAt = W.now;
+        b.lastHardHitAt = W.now;
+        a.lastImpact = rel;
+        b.lastImpact = rel;
       }
     }
   }

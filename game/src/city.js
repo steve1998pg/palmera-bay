@@ -7,7 +7,7 @@
 // stashes) so a given seed always builds the same city.
 import * as THREE from '../vendor/three.module.min.js';
 import { mulberry32, pick, range, clamp } from './random.js';
-import { STREETS, BOULEVARD_X, DISTRICTS, LOCATIONS } from './config.js';
+import { STREETS, BOULEVARD_X, ROAD_W, DISTRICTS, LOCATIONS } from './config.js';
 
 function canvasTexture(w, h, draw) {
   const c = document.createElement('canvas');
@@ -501,6 +501,36 @@ function attachCityHelpers(city) {
     const sun = city.sunLight;
     sun.position.set(px - 260, 180, pz + 120);
     sun.target.position.set(px, 0, pz);
+  };
+
+  // A point just off the road at (x, z): step sideways from the nearest
+  // street line so a waiting pedestrian stands on the sidewalk instead of
+  // in the driving lane, then push it out of any building it landed in.
+  city.sidewalkPoint = function (x, z) {
+    let best = null;
+    let bd = Infinity;
+    for (const s of STREETS) {
+      const dx = Math.abs(x - s);
+      if (dx < bd) {
+        bd = dx;
+        best = { axis: 'x', at: s };
+      }
+      const dz = Math.abs(z - s);
+      if (dz < bd) {
+        bd = dz;
+        best = { axis: 'z', at: s };
+      }
+    }
+    let px = x;
+    let pz = z;
+    if (best) {
+      // Sidewalk shoulder: half the road width plus a step onto the walk.
+      const off = (Math.random() < 0.5 ? -1 : 1) * (ROAD_W / 2 + 3.5);
+      if (best.axis === 'x') px = best.at + off;
+      else pz = best.at + off;
+    }
+    const res = city.resolveCircle(px, pz, 0.6);
+    return { x: res.x, z: res.z };
   };
 
   city.setMarker = function (x, z, label) {

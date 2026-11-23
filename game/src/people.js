@@ -136,8 +136,35 @@ function pickStrollTarget(W, p) {
   p.targetZ = node.z + (Math.random() - 0.5) * 10;
 }
 
-// Ped AI: stroll between nearby road nodes; run from danger.
+// Ped AI: stroll between nearby road nodes; run from danger. A taxi fare
+// (p.taxiFare) holds its ground instead: it stands on the kerb waving one
+// arm for a cab, or trails the player to the car once picked up.
 export function updatePed(W, p, dt, now) {
+  if (p.taxiFare) {
+    const u = p.mesh.userData;
+    if (p.taxiFollowing) {
+      // Trailing Dante to the car: a normal walk cycle.
+      p.state = 'taxi-follow';
+      p.speed = 4.6;
+      p.walkPhase += dt * 9;
+      const s = Math.sin(p.walkPhase) * 0.55;
+      u.legL.rotation.x = s;
+      u.legR.rotation.x = -s;
+      u.armL.rotation.x = -s * 0.8;
+      u.armR.rotation.x = s * 0.8;
+    } else {
+      // Waiting on the kerb: still feet, right arm raised and waving.
+      p.state = 'taxi-wait';
+      p.speed = 0;
+      u.legL.rotation.x *= 0.8;
+      u.legR.rotation.x *= 0.8;
+      u.armL.rotation.x *= 0.8;
+      u.armR.rotation.x = -2.2 + Math.sin(now * 5) * 0.35;
+    }
+    p.mesh.position.set(p.x, p.y, p.z);
+    p.mesh.rotation.y = p.heading;
+    return;
+  }
   const pp = W.playerPos();
   const inDanger = W.police.wanted > 0 && Math.hypot(p.x - pp.x, p.z - pp.z) < 26;
   if (inDanger || now < p.fleeUntil) {

@@ -11,6 +11,7 @@ import { makePlayer } from './player.js';
 import { makePolice } from './police.js';
 import { makeMissions } from './missions.js';
 import { makeHud } from './hud.js';
+import { makeTaxi } from './taxi.js';
 import { stageShot } from './shots.js';
 import { spawnCar, removeCar, driveCar, damageCar, updateTraffic, collideCars } from './vehicles.js';
 import { spawnPerson, updatePeople } from './people.js';
@@ -51,6 +52,7 @@ W.player = makePlayer(W);
 W.police = makePolice(W);
 W.missions = makeMissions(W);
 W.hud = makeHud(W);
+W.taxi = makeTaxi(W);
 
 // ---- world helpers wired onto W (used by the modules) ----
 W.playerPos = function () {
@@ -338,6 +340,8 @@ W.respawn = function () {
   W.hud.hideJobDone();
   W.state = 'playing';
   W.missions.restartCurrentJob();
+  // A fare does not survive death: the passenger is gone when Dante wakes.
+  if (W.taxi) W.taxi.abort();
   W.save.write();
   W.hudDirty = true;
 };
@@ -371,6 +375,8 @@ function resetStats(p, saveData) {
     raceWins: (s && s.raceWins) || 0,
     drivenKm: (s && s.drivenKm) || 0,
     shotsFired: (s && s.shotsFired) || 0,
+    faresCompleted: (s && s.faresCompleted) || 0,
+    faresEarned: (s && s.faresEarned) || 0,
   };
 }
 
@@ -454,6 +460,7 @@ function resetPlayerToStart(saveData) {
 W.startNewGame = function () {
   W.save.clear();
   resetPlayerToStart(null);
+  if (W.taxi) W.taxi.abort();
   W.missions.jobIndex = 0;
   W.missions.completedJobs = 0;
   W.missions.startJob(0);
@@ -471,6 +478,7 @@ W.continueGame = function () {
     return;
   }
   resetPlayerToStart(data);
+  if (W.taxi) W.taxi.abort();
   W.missions.completedJobs = data.completedJobs;
   W.missions.startJob(data.jobIndex);
   W.state = 'playing';
@@ -656,6 +664,11 @@ W.onKeyDown = function (code) {
     return;
   }
   if (W.state === 'shop') return;
+  // T: hail / pick up a taxi fare (free roam only; the module decides).
+  if (code === 'KeyT') {
+    if (W.taxi) W.taxi.tryPickup();
+    return;
+  }
   const WEAPON_KEYS = { Digit1: 'fists', Digit2: 'pistol', Digit3: 'smg', Digit4: 'shotgun', Digit5: 'rifle' };
   if (code === 'KeyC') {
     const st = W.audio.cycleStation();
@@ -791,6 +804,7 @@ const pb = {
   get clockMinutes() { return W.clockMinutes; },
   get shotMode() { return W.shotMode; },
   get shotFired() { return W.shotFired; },
+  get taxi() { return W.taxi; },
   playerPos: () => W.playerPos(),
   spawnPed: (x, z) => W.spawnPed(x, z),
   spawnEnemies: (n, x, z, tag) => W.spawnEnemies(n, x, z, tag),
@@ -847,6 +861,7 @@ function stepWorld(dt) {
   updatePeople(W, dt, W.now);
   W.police.update(dt, W.now);
   W.missions.update(dt, W.now);
+  W.taxi.update(dt);
   // Keep the streets populated.
   if (W.cars.filter((c) => c.ai === 'traffic' && !c.dead).length < 12) spawnTrafficCar();
   if (W.people.filter((p) => p.kind === 'ped' && !p.dead && !p.car).length < 18) spawnPedNear();

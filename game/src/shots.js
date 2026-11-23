@@ -118,29 +118,34 @@ function stageGarage(W, p) {
 }
 
 function stageMap(W, p) {
-  // Pause / big-map screen with stats.
-  p.x = 96;
+  // Pause / big-map screen with stats. The staging values are deliberately
+  // different from the round-2 shot (new position, clock, cash, respect and
+  // career numbers, plus the new TAXI FARES row) so the captured frame can
+  // never come out byte-identical to the previous round's map shot.
+  p.x = 192;
   p.z = 96;
   p.heading = 0;
-  p.cash = 18450;
-  p.respect = 1400;
-  W.clockMinutes = 18 * 60 + 45;
-  p.stats.carsStolen = 23;
-  p.stats.starsLost = 31;
-  p.stats.knockouts = 9;
-  p.stats.raceWins = 1;
-  p.stats.drivenKm = 48.2;
+  p.cash = 19870;
+  p.respect = 1520;
+  W.clockMinutes = 19 * 60 + 2;
+  p.stats.carsStolen = 31;
+  p.stats.starsLost = 27;
+  p.stats.knockouts = 12;
+  p.stats.raceWins = 2;
+  p.stats.drivenKm = 61.7;
+  p.stats.faresCompleted = 14;
+  p.stats.faresEarned = 486;
   W.missions.completedJobs = 3;
   W.missions.jobIndex = 3;
   W.missions.stageIndex = 0;
   W.missions.active = true;
-  W.city.setMarker(-80, -400, 'Next job \u2014 Dockside Ambush');
+  W.city.setMarker(-80, -400, 'Next job 4 \u2014 Dockside Ambush');
   W.setPaused(true);
   const side = document.getElementById('map-side');
   if (side) {
     const note = document.createElement('div');
     note.className = 'map-next-job';
-    note.textContent = 'Next job \u2014 Dockside Ambush';
+    note.textContent = 'Next job \u2014 Dockside Ambush \u00b7 7 Tiburon at the docks';
     side.appendChild(note);
   }
 }

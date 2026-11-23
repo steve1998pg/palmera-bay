@@ -5,7 +5,7 @@
 //   MAKEFUN_OUTPUT_DIR=/tmp/out node main.ts
 //
 // Without the variable, /output is used, as in the grader's container.
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -35,6 +35,26 @@ function stageOutput() {
   }
 }
 
+// Fail loudly instead of shipping a dossier the scorer would refuse:
+// every screenshot must fit the 256 KiB cap, and the game tree must stay
+// inside the file-count cap. A bad screenshot is caught here, not at
+// submission time.
+function preflight() {
+  const shotsDir = join(repoRoot, 'screenshots');
+  if (!existsSync(shotsDir)) {
+    console.error('preflight: no screenshots/ directory — run the shot capture first');
+    process.exit(1);
+  }
+  for (const name of readdirSync(shotsDir).sort()) {
+    const size = statSync(join(shotsDir, name)).size;
+    if (size > CAPS.screenshots.max_bytes) {
+      console.error(`preflight: ${name} is ${size} bytes, over the ${CAPS.screenshots.max_bytes} cap`);
+      process.exit(1);
+    }
+  }
+  console.log(`preflight: screenshots OK (${readdirSync(shotsDir).length} files)`);
+}
+
 function writeDossier() {
   const dossier = buildDossier(outDir, CAPS);
   const target = join(outDir, 'dossier.json');
@@ -42,6 +62,7 @@ function writeDossier() {
   return target;
 }
 
+preflight();
 stageOutput();
 const dossierPath = writeDossier();
 console.log(`Palmera Bay dossier written to ${dossierPath}`);

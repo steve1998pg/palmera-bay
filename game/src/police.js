@@ -4,7 +4,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { UNIT_NAMES } from './config.js';
 import { clamp, angleDiff } from './random.js';
-import { spawnCar, driveCar } from './vehicles.js';
+import { spawnCar, driveCar, carAheadBlocked } from './vehicles.js';
 
 const STAR_FLOORS = [90, 72, 52, 32, 12];
 const UNITS_PER_STAR = [0, 2, 3, 4, 6, 8];
@@ -49,7 +49,15 @@ function steerToward(car, tx, tz) {
 }
 
 function driveToward(W, car, tx, tz, dt) {
-  driveCar(W, car, { throttle: 1, steer: steerToward(car, tx, tz), nitro: false }, dt);
+  // A cruiser rams the player's driven car, but it does not grind a parked
+  // car to scrap: with another car directly ahead (a parked coupe, a
+  // traffic car, a fellow cruiser) it lifts off the throttle and steers
+  // around instead of holding full throttle into the obstacle. Without
+  // this, three cruisers converging on a player on foot destroy the
+  // player's parked car in seconds — the car is between them and the
+  // player, and every frame of contact deals collision damage.
+  const blocked = carAheadBlocked(W, car, W.player.inCar);
+  driveCar(W, car, { throttle: blocked ? 0 : 1, steer: steerToward(car, tx, tz), nitro: false }, dt);
 }
 
 export function makePolice(W) {
@@ -151,9 +159,12 @@ export function makePolice(W) {
     if (d < 12) driveToward(W, u, pp.x, pp.z, dt);
     else chaseAlongGraph(W, u, dt, now, px, pz);
     // A foot cop climbs out when the player is on foot and the cruiser is close.
+    // The drop point is pushed out of any building first, so the cop never
+    // spawns inside a wall.
     if (P.wanted >= 2 && !W.player.inCar && d < 9 && !u.droppedCop) {
       u.droppedCop = true;
-      P.footCops.push(W.spawnPerson('cop', u.x + 2, u.z + 2, {}));
+      const drop = W.city.resolveCircle(u.x + 2, u.z + 2, 0.6);
+      P.footCops.push(W.spawnPerson('cop', drop.x, drop.z, {}));
     }
   }
 
@@ -254,11 +265,13 @@ export function makePolice(W) {
   }
 
   function topUpFootCops(pp) {
-    // Foot cops: keep at most wanted-1 alive.
+    // Foot cops: keep at most wanted-1 alive. The reinforcement spawns
+    // beside the player, pushed out of any building first.
     const maxCops = Math.max(0, P.wanted - 1);
     const liveCops = P.footCops.filter((c) => !c.dead);
     if (liveCops.length < maxCops && P.wanted >= 2) {
-      P.footCops.push(W.spawnPerson('cop', pp.x + 26, pp.z + 18, {}));
+      const drop = W.city.resolveCircle(pp.x + 26, pp.z + 18, 0.6);
+      P.footCops.push(W.spawnPerson('cop', drop.x, drop.z, {}));
     }
     P.footCops = P.footCops.filter((c) => !c.dead || W.now - c.deathAt < 14);
   }
